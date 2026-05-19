@@ -44,7 +44,7 @@ limit_max_time = 45
 eval_min_time = 0
 eval_max_time = 0
 
-WINDOW_SIZE = 40
+WINDOW_SIZE = 30
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
 is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定なし

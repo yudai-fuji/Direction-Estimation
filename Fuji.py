@@ -21,12 +21,12 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'251209星田共同研究\HwL2.csv'
-file_R = r'251209星田共同研究\HwR2.csv'
-delay_time = 3.06
+file_L = r'260518栁澤共同研究\KL1.csv'
+file_R = r'260518栁澤共同研究\KR1.csv'
+delay_time = 0.892716
 cod_time = 21.99
-limit_min_time = 13.4
-limit_max_time = 27.75
+limit_min_time = 2
+limit_max_time = 45
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
@@ -36,7 +36,7 @@ eval_max_time = 0
 WINDOW_SIZE = 40
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
-is_mask_g = 0     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
+is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
 
 
 # =========================================================
@@ -57,7 +57,7 @@ PRINT_SYNC_DIAGNOSTICS = True
 # =========================================================
 DO_ACC_PCA = True              # 加速度PCA法
 DO_PROPOSED_ACC_PCA = True     # 寄与率重み付き加速度PCA法
-DO_GYRO_INTEGRAL = False        # 角速度累積法
+DO_GYRO_INTEGRAL = True        # 角速度累積法
 DO_GYRO_PCA = False             # 角速度PCA法
 
 
@@ -73,8 +73,8 @@ DO_PCA_RATIO_PRINT = True      # PCA寄与率の統計表示
 # =========================================================
 # 時系列プロットの選択
 # =========================================================
-PLOT_ACC_PCA = False            # 加速度PCA法
-PLOT_PROPOSED_ACC_PCA = False   # 寄与率重み付き加速度PCA法
+PLOT_ACC_PCA = True            # 加速度PCA法
+PLOT_PROPOSED_ACC_PCA = True   # 寄与率重み付き加速度PCA法
 PLOT_GYRO_INTEGRAL = True      # 角速度累積法
 PLOT_GYRO_PCA = True           # 角速度PCA法
 

@@ -13,12 +13,12 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'251209星田共同研究\HL6.csv'
-file_R = r'251209星田共同研究\HR6.csv'
-delay_time = 5.056      # 左右端末の開始時刻ずれ補正 [s]
-cod_time = 22.06      # 方向転換時刻 [s]
-limit_min_time = 10.85
-limit_max_time = 28.16
+file_L = r'260518栁澤共同研究\KL1.csv'
+file_R = r'260518栁澤共同研究\KR1.csv'
+delay_time = 0.892716
+cod_time = 21.99
+limit_min_time = 2
+limit_max_time = 45
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない

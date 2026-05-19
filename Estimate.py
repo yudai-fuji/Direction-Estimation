@@ -12,12 +12,13 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'251209星田共同研究\HwL2.csv'
-file_R = r'251209星田共同研究\HwR2.csv'
-delay_time = 3.06
+# =========================================================
+file_L = r'260518栁澤共同研究\KL1.csv'
+file_R = r'260518栁澤共同研究\KR1.csv'
+delay_time = 0.892716
 cod_time = 21.99
-limit_min_time = 13.4
-limit_max_time = 27.75
+limit_min_time = 2
+limit_max_time = 45
 
 eval_min_time = 0
 eval_max_time = 0
