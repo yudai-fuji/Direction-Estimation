@@ -25,8 +25,8 @@ file_L = r'260518栁澤共同研究\KL1.csv'
 file_R = r'260518栁澤共同研究\KR1.csv'
 delay_time = 0.892716
 cod_time = 21.99
-limit_min_time = 2
-limit_max_time = 45
+limit_min_time = 12.27
+limit_max_time = 39.45
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
