@@ -387,10 +387,10 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
 # 12) 方向変換時刻の縦線を追加する処理
 # =========================================================
 
-def add_cod_time_lines_to_plot():
+def add_cod_time_lines_to_plot(ax):
     for i, ct in enumerate(cod_times):
         label = '方向変換時刻' if i == 0 else None
-        plt.axvline(
+        ax.axvline(
             ct,
             c='black',
             linestyle=':',
@@ -403,10 +403,10 @@ def add_cod_time_lines_to_plot():
 # 13) 回転後Gyzと |Gyz| 平滑化値をプロットする処理
 # =========================================================
 
-def plot_gyro_z_timeseries(gyro_z_df, hand_label):
+def prepare_gyro_z_plot_df(gyro_z_df, hand_label):
     if gyro_z_df is None or len(gyro_z_df) == 0:
         print(f'{hand_label}: プロットできる角速度データがありません．')
-        return
+        return None
 
     plot_df = (
         gyro_z_df
@@ -425,84 +425,108 @@ def plot_gyro_z_timeseries(gyro_z_df, hand_label):
 
     if len(plot_df) == 0:
         print(f'{hand_label}: 指定範囲内に角速度データがありません．')
-        return
-    
-    fig, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
+        return None
 
-    # =====================================================
-    # 1) 生のGyz
-    # =====================================================
-    axes[0].plot(
-        plot_df['time_s'],
-        plot_df['Gyz_deg_s'],
-        alpha=0.8
+    return plot_df
+
+
+def select_gyro_z_plot_mode():
+    while True:
+        print('\n=== GyroZプロット種別の選択 ===')
+        print('0: 絶対値を計算したプロット（|Gyz|）')
+        print('1: 生の角速度データでプロット（Gyz）')
+
+        plot_mode = input('表示するプロットを選択してください [0/1]: ').strip()
+
+        if plot_mode in ['0', '1']:
+            return plot_mode
+
+        print('0 または 1 を入力してください．')
+
+
+def get_gyro_z_plot_specs(plot_mode):
+    if plot_mode == '0':
+        return (
+            '角速度Z成分（絶対値）の時系列変化',
+            [
+                ('abs_Gyz_deg_s', '|Gyz| [deg/s]', '|Gyz|', {'alpha': 0.8}),
+                (
+                    'abs_Gyz_smooth_deg_s',
+                    '|Gyz|移動平均 [deg/s]',
+                    '|Gyz|移動平均',
+                    {'linewidth': 2, 'alpha': 0.9}
+                )
+            ]
+        )
+
+    return (
+        '角速度Z成分（生データ）の時系列変化',
+        [
+            ('Gyz_deg_s', 'Gyz [deg/s]', 'Gyz', {'alpha': 0.8}),
+            (
+                'Gyz_smooth_deg_s',
+                'Gyz移動平均 [deg/s]',
+                'Gyz移動平均',
+                {'linewidth': 2, 'alpha': 0.9}
+            )
+        ]
     )
 
-    axes[0].set_title(f'角速度Z成分の時系列変化（{hand_label}）')
-    axes[0].set_ylabel('角速度 [deg/s]')
 
-    # =====================================================
-    # 2) 生のGyzを絶対値化した結果
-    # =====================================================
-    plt.figure(figsize=(10, 6))
+def plot_gyro_z_timeseries(
+    gyro_z_L,
+    gyro_z_R,
+    left_label,
+    right_label,
+    plot_mode
+):
+    plot_items = [
+        (prepare_gyro_z_plot_df(gyro_z_L, left_label), left_label),
+        (prepare_gyro_z_plot_df(gyro_z_R, right_label), right_label)
+    ]
 
-    plt.plot(
-        plot_df['time_s'],
-        plot_df['abs_Gyz_deg_s'],
-        alpha=0.8
+    figure_title, plot_specs = get_gyro_z_plot_specs(plot_mode)
+
+    fig, axes = plt.subplots(
+        len(plot_specs),
+        2,
+        figsize=(16, 8),
+        sharex=True,
+        squeeze=False
     )
+    fig.suptitle(figure_title, fontsize=16)
 
-    add_cod_time_lines_to_plot()
+    for col_index, (plot_df, hand_label) in enumerate(plot_items):
+        axes[0, col_index].set_title(hand_label)
 
-    plt.xlabel('時間 [s]')
-    plt.ylabel('角速度の絶対値 [deg/s]')
-    plt.title(f'角速度Z成分(>0)の時系列変化（{hand_label}）')
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+        for row_index, (value_col, ylabel, series_label, plot_kwargs) in enumerate(plot_specs):
+            ax = axes[row_index, col_index]
 
-    # =====================================================
-    # 3) 生のGyzの移動平均
-    # =====================================================
-    plt.figure(figsize=(10, 6))
+            if plot_df is not None:
+                ax.plot(
+                    plot_df['time_s'],
+                    plot_df[value_col],
+                    label=series_label,
+                    **plot_kwargs
+                )
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    '表示できるデータがありません',
+                    ha='center',
+                    va='center',
+                    transform=ax.transAxes
+                )
 
-    plt.plot(
-        plot_df['time_s'],
-        plot_df['Gyz_smooth_deg_s'],
-        linewidth=2,
-        alpha=0.9
-    )
+            add_cod_time_lines_to_plot(ax)
+            ax.set_ylabel(ylabel)
+            ax.grid(True)
+            ax.legend()
 
-    add_cod_time_lines_to_plot()
+    for ax in axes[-1, :]:
+        ax.set_xlabel('時間 [s]')
 
-    plt.xlabel('時間 [s]')
-    plt.ylabel('平滑化角速度 [deg/s]')
-    plt.title(f'角速度Z成分の移動平均（{hand_label}）')
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-    # =====================================================
-    # 4) |Gyz| の移動平均
-    # =====================================================
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(
-        plot_df['time_s'],
-        plot_df['abs_Gyz_smooth_deg_s'],
-        linewidth=2,
-        alpha=0.9
-    )
-
-    add_cod_time_lines_to_plot()
-
-    plt.xlabel('時間 [s]')
-    plt.ylabel('平滑化角速度 [deg/s]')
-    plt.title(f'角速度Z成分(>0)の移動平均（{hand_label}）')
-    plt.grid(True)
-    plt.legend()
     plt.tight_layout()
     plt.show()
 
@@ -512,6 +536,8 @@ def plot_gyro_z_timeseries(gyro_z_df, hand_label):
 # =========================================================
 
 def main():
+    plot_mode = select_gyro_z_plot_mode()
+
     # -----------------------------------------------------
     # 1．CSV読み込みと time_s 作成
     # -----------------------------------------------------
@@ -567,12 +593,10 @@ def main():
     # -----------------------------------------------------
     plot_gyro_z_timeseries(
         gyro_z_L,
-        hand_label='左手の端末'
-    )
-    
-    plot_gyro_z_timeseries(
         gyro_z_R,
-        hand_label='右手の端末'
+        left_label='左手の端末',
+        right_label='右手の端末',
+        plot_mode=plot_mode
     )
     
 
