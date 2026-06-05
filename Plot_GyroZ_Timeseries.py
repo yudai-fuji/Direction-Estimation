@@ -1,11 +1,14 @@
+#端末座標系の角速度を世界基準の座標系へ回転変換し、Z軸角速度成分 Gyz の時系列変化を可視化する。
+#回転後Z軸角速度 Gyz、Gyz の絶対値、|Gyz| の移動平均をプロット
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import math
 import japanize_matplotlib
 
-file_L = r'260518栁澤共同研究\KL1.csv'
-file_R = r'260518栁澤共同研究\KR1.csv'
+file_L = r'260518栁澤共同研究/KL1.csv'
+file_R = r'260518栁澤共同研究/KR1.csv'
 
 delay_time = 0.892716
 
@@ -189,7 +192,7 @@ def assign_sensor_to_grid(df, sensor_name, grid_df):
         grid_df.sort_values('time_s'),
         sensor_df.sort_values('time_s'),
         on='time_s',
-        direction='nearest',
+        direction='backward',
         tolerance=NEAREST_TOLERANCE
     )
 
@@ -285,6 +288,23 @@ def moving_average_abs_gyro(omega_z_deg_s, smooth_window=10):
 
     return omega_abs_smooth
 
+# ----------絶対値化しない移動平均関数----------------
+def moving_average_gyro(omega_z_deg_s, smooth_window=10):
+    omega_z_deg_s = np.asarray(omega_z_deg_s, dtype=float)
+
+    omega_smooth = (
+        pd.Series(omega_z_deg_s)
+        .rolling(
+            window=smooth_window,
+            center=False,
+            min_periods=1
+        )
+        .mean()
+        .to_numpy()
+    )
+
+    return omega_smooth
+
 
 # =========================================================
 # 11) 同期済みデータから回転後Gyzを計算する処理
@@ -313,6 +333,7 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
             columns=[
                 'time_s',
                 'Gyz_deg_s',
+                'Gyz_smooth_deg_s',
                 'abs_Gyz_deg_s',
                 'abs_Gyz_smooth_deg_s'
             ]
@@ -339,6 +360,12 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
     # 生のGyzを絶対値化したもの
     abs_Gyz_deg_s = np.abs(Gyz_deg_s)
 
+    # 生のGyzの移動平均
+    Gyz_smooth_deg_s = moving_average_gyro(
+        Gyz_deg_s,
+        smooth_window=GYRO_SMOOTH_WINDOW
+    )
+
     # |Gyz| の移動平均
     abs_Gyz_smooth = moving_average_abs_gyro(
         Gyz_deg_s,
@@ -348,8 +375,9 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
     result = pd.DataFrame({
         'time_s': data['time_s'].to_numpy(),
         'Gyz_deg_s': Gyz_deg_s,
+        'Gyz_smooth_deg_s': Gyz_smooth_deg_s,
         'abs_Gyz_deg_s': abs_Gyz_deg_s,
-        'abs_Gyz_smooth_deg_s': abs_Gyz_smooth
+        'abs_Gyz_smooth_deg_s': abs_Gyz_smooth        
     })
 
     return result
@@ -398,27 +426,20 @@ def plot_gyro_z_timeseries(gyro_z_df, hand_label):
     if len(plot_df) == 0:
         print(f'{hand_label}: 指定範囲内に角速度データがありません．')
         return
+    
+    fig, axes = plt.subplots(4, 1, figsize=(12, 12), sharex=True)
 
     # =====================================================
     # 1) 生のGyz
     # =====================================================
-    plt.figure(figsize=(10, 6))
-
-    plt.plot(
+    axes[0].plot(
         plot_df['time_s'],
         plot_df['Gyz_deg_s'],
         alpha=0.8
     )
 
-    add_cod_time_lines_to_plot()
-
-    plt.xlabel('時間 [s]')
-    plt.ylabel('角速度 [deg/s]')
-    plt.title(f'角速度Z成分の時系列変化（{hand_label}）')
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    axes[0].set_title(f'角速度Z成分の時系列変化（{hand_label}）')
+    axes[0].set_ylabel('角速度 [deg/s]')
 
     # =====================================================
     # 2) 生のGyzを絶対値化した結果
@@ -442,7 +463,29 @@ def plot_gyro_z_timeseries(gyro_z_df, hand_label):
     plt.show()
 
     # =====================================================
-    # 3) |Gyz| の移動平均
+    # 3) 生のGyzの移動平均
+    # =====================================================
+    plt.figure(figsize=(10, 6))
+
+    plt.plot(
+        plot_df['time_s'],
+        plot_df['Gyz_smooth_deg_s'],
+        linewidth=2,
+        alpha=0.9
+    )
+
+    add_cod_time_lines_to_plot()
+
+    plt.xlabel('時間 [s]')
+    plt.ylabel('平滑化角速度 [deg/s]')
+    plt.title(f'角速度Z成分の移動平均（{hand_label}）')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # =====================================================
+    # 4) |Gyz| の移動平均
     # =====================================================
     plt.figure(figsize=(10, 6))
 
