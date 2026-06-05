@@ -21,7 +21,7 @@ SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-GYRO_SMOOTH_WINDOW = 30
+GYRO_SMOOTH_WINDOW = 45
 
 is_mask = 1
 
@@ -494,7 +494,10 @@ def plot_gyro_z_timeseries(
         sharex=True,
         squeeze=False
     )
-    fig.suptitle(figure_title, fontsize=16)
+    fig.suptitle(
+        f'{figure_title}（移動平均窓幅: {GYRO_SMOOTH_WINDOW}サンプル）',
+        fontsize=16
+    )
 
     for col_index, (plot_df, hand_label) in enumerate(plot_items):
         axes[0, col_index].set_title(hand_label)
