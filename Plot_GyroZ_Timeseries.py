@@ -21,7 +21,7 @@ SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-GYRO_SMOOTH_WINDOW = 45
+GYRO_SMOOTH_WINDOW = 40
 
 is_mask = 1
 
@@ -430,62 +430,31 @@ def prepare_gyro_z_plot_df(gyro_z_df, hand_label):
     return plot_df
 
 
-def select_gyro_z_plot_mode():
-    while True:
-        print('\n=== GyroZプロット種別の選択 ===')
-        print('0: 絶対値を計算したプロット（|Gyz|）')
-        print('1: 生の角速度データでプロット（Gyz）')
-
-        plot_mode = input('表示するプロットを選択してください [0/1]: ').strip()
-
-        if plot_mode in ['0', '1']:
-            return plot_mode
-
-        print('0 または 1 を入力してください．')
-
-
-def get_gyro_z_plot_specs(plot_mode):
-    if plot_mode == '0':
-        return (
-            '角速度Z成分（絶対値）の時系列変化',
-            [
-                ('abs_Gyz_deg_s', '|Gyz| [deg/s]', '|Gyz|', {'alpha': 0.8}),
-                (
-                    'abs_Gyz_smooth_deg_s',
-                    '|Gyz|移動平均 [deg/s]',
-                    '|Gyz|移動平均',
-                    {'linewidth': 2, 'alpha': 0.9}
-                )
-            ]
-        )
-
-    return (
-        '角速度Z成分（生データ）の時系列変化',
-        [
-            ('Gyz_deg_s', 'Gyz [deg/s]', 'Gyz', {'alpha': 0.8}),
-            (
-                'Gyz_smooth_deg_s',
-                'Gyz移動平均 [deg/s]',
-                'Gyz移動平均',
-                {'linewidth': 2, 'alpha': 0.9}
-            )
-        ]
-    )
-
-
 def plot_gyro_z_timeseries(
     gyro_z_L,
     gyro_z_R,
     left_label,
-    right_label,
-    plot_mode
+    right_label
 ):
     plot_items = [
         (prepare_gyro_z_plot_df(gyro_z_L, left_label), left_label),
         (prepare_gyro_z_plot_df(gyro_z_R, right_label), right_label)
     ]
 
-    figure_title, plot_specs = get_gyro_z_plot_specs(plot_mode)
+    plot_specs = [
+        (
+            'Gyz_smooth_deg_s',
+            'Gyz移動平均 [deg/s]',
+            'Gyz移動平均',
+            {'linewidth': 2, 'alpha': 0.9}
+        ),
+        (
+            'abs_Gyz_smooth_deg_s',
+            '|Gyz|移動平均 [deg/s]',
+            '|Gyz|移動平均',
+            {'linewidth': 2, 'alpha': 0.9}
+        )
+    ]
 
     fig, axes = plt.subplots(
         len(plot_specs),
@@ -495,7 +464,7 @@ def plot_gyro_z_timeseries(
         squeeze=False
     )
     fig.suptitle(
-        f'{figure_title}（移動平均窓幅: {GYRO_SMOOTH_WINDOW}サンプル）',
+        f'角速度Z成分の移動平均（移動平均窓幅: {GYRO_SMOOTH_WINDOW}サンプル）',
         fontsize=16
     )
 
@@ -539,8 +508,6 @@ def plot_gyro_z_timeseries(
 # =========================================================
 
 def main():
-    plot_mode = select_gyro_z_plot_mode()
-
     # -----------------------------------------------------
     # 1．CSV読み込みと time_s 作成
     # -----------------------------------------------------
@@ -594,12 +561,12 @@ def main():
     # -----------------------------------------------------
     # 5．プロット
     # -----------------------------------------------------
+    print('\n=== 角速度Z成分の移動平均を表示します ===')
     plot_gyro_z_timeseries(
         gyro_z_L,
         gyro_z_R,
         left_label='左手の端末',
-        right_label='右手の端末',
-        plot_mode=plot_mode
+        right_label='右手の端末'
     )
     
 
