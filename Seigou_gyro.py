@@ -28,8 +28,8 @@ except ImportError:
 # =========================================================
 # 設定
 # =========================================================
-FILE_L = 'CCA_L.csv'
-FILE_R = 'CCA_R.csv'
+file_L = r'260518栁澤共同研究/KL2.csv'
+file_R = r'260518栁澤共同研究/KR2.csv'
 
 # 同期に使うセンサ
 SYNC_SENSOR = "Gyro"
@@ -374,8 +374,8 @@ def plot_after_alignment(
 if __name__ == "__main__":
     
     result, sync_R, sync_L = estimate_delay_time(
-        file_R=FILE_R,
-        file_L=FILE_L,
+        file_R=file_R,
+        file_L=file_L,
         right_window=SYNC_RIGHT_WINDOW,
         left_window=SYNC_LEFT_WINDOW,
         sensor_name=SYNC_SENSOR,
