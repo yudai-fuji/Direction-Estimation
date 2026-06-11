@@ -21,19 +21,19 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'260518栁澤共同研究\KL1.csv'
-file_R = r'260518栁澤共同研究\KR1.csv'
-delay_time = 0.892716
+file_L = r'251209星田共同研究\HwL2.csv'
+file_R = r'251209星田共同研究\HwR2.csv'
+delay_time = 3.06
 cod_time = 21.99
-limit_min_time = 12.27
-limit_max_time = 39.45
+limit_min_time = 13.4
+limit_max_time = 27.75
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
 eval_min_time = 0
 eval_max_time = 0
 
-WINDOW_SIZE = 40
+WINDOW_SIZE = 30
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
 is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定なし

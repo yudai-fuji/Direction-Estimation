@@ -7,21 +7,18 @@ import numpy as np
 import math
 import japanize_matplotlib
 
-file_L = r'260518栁澤共同研究/KL1.csv'
-file_R = r'260518栁澤共同研究/KR1.csv'
-
-delay_time = 0.892716
-
-cod_times = [20.61, 25.41, 35.54]
-
-limit_min_time = 12.27
-limit_max_time = 39.45
+file_L = r'260518栁澤共同研究/KL2.csv'
+file_R = r'260518栁澤共同研究/KR2.csv'
+delay_time = 0.449970
+cod_times = [17.96, 22.5, 32.45]
+limit_min_time = 8
+limit_max_time = 39.31
 
 SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-GYRO_SMOOTH_WINDOW = 40
+GYRO_SMOOTH_WINDOW = 30
 
 is_mask = 1
 
