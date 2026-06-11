@@ -24,20 +24,26 @@ limit_max_time = 39.45
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
+#固定窓のPCA適用本数
 WINDOW_SIZE = 40
 
-PCA_WINDOW_MAX = 40
-
+# 可変窓のPCA適用本数の最大値と最小値
+PCA_WINDOW_MAX = 50
 PCA_WINDOW_MIN = 25
 
-GYRO_HIGH_THRESHOLD = 90.0
+# ジャイロの移動平均絶対値がこの値を超えたら窓幅を最小にする。
+GYRO_HIGH_THRESHOLD = 110
 
-GYRO_LOW_THRESHOLD = 65.0
+# ジャイロの移動平均絶対値がこの値を下回ったら窓幅回復開始の条件を満たす。
+GYRO_LOW_THRESHOLD = 70
 
+# 窓幅回復開始からこの本数ごとに窓幅を回復させる。
 WINDOW_RECOVERY_STEP = 3
 
+# 窓幅回復開始からこの本数ごとに窓幅を回復させる条件を満たすとみなす。
 WINDOW_RECOVERY_INTERVAL = 10
 
+# センサ値を共通グリッドへ最近傍で割り当てる際の許容時間差の最大値
 SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
@@ -51,10 +57,6 @@ is_mask_g = 1
 
 PRINT_SYNC_DIAGNOSTICS = True
 
-
-# =========================================================
-# Angle utilities
-# =========================================================
 # 角度を-180度以上180度未満の範囲へ正規化する。
 def wrap_pm180(theta_deg):
     if is_mask_g == 1:
@@ -114,9 +116,6 @@ def add_cod_time_lines_to_axis(ax):
         )
 
 
-# =========================================================
-# Quaternion and rotation utilities
-# =========================================================
 # クォータニオンの共役成分を返す。
 def kyoyaku(gx, gy, gz, gw):
     return (-gx, -gy, -gz, gw)
