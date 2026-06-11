@@ -563,6 +563,53 @@ def make_window_schedule_from_gyro(
     return data
 
 
+# 左右の角速度移動平均の大きい方を使って，共通のPCA窓幅時系列を作る。
+def make_common_window_schedule_from_gyro(gyro_z_L, gyro_z_R):
+    if gyro_z_L is None or len(gyro_z_L) == 0:
+        return make_window_schedule_from_gyro(gyro_z_R)
+
+    if gyro_z_R is None or len(gyro_z_R) == 0:
+        return make_window_schedule_from_gyro(gyro_z_L)
+
+    left = (
+        gyro_z_L[['time_s', 'abs_Gyz_smooth_deg_s']]
+        .copy()
+        .rename(columns={'abs_Gyz_smooth_deg_s': 'abs_Gyz_smooth_deg_s_L'})
+        .sort_values('time_s')
+        .reset_index(drop=True)
+    )
+    right = (
+        gyro_z_R[['time_s', 'abs_Gyz_smooth_deg_s']]
+        .copy()
+        .rename(columns={'abs_Gyz_smooth_deg_s': 'abs_Gyz_smooth_deg_s_R'})
+        .sort_values('time_s')
+        .reset_index(drop=True)
+    )
+
+    common_gyro = pd.merge(
+        left,
+        right,
+        on='time_s',
+        how='inner'
+    )
+
+    if len(common_gyro) == 0:
+        return pd.DataFrame(columns=[
+            'time_s',
+            'abs_Gyz_smooth_deg_s',
+            'window_size'
+        ])
+
+    common_gyro['abs_Gyz_smooth_deg_s'] = common_gyro[[
+        'abs_Gyz_smooth_deg_s_L',
+        'abs_Gyz_smooth_deg_s_R'
+    ]].max(axis=1)
+
+    return make_window_schedule_from_gyro(
+        common_gyro[['time_s', 'abs_Gyz_smooth_deg_s']]
+    )
+
+
 # =========================================================
 # Acceleration PCA
 # =========================================================
@@ -1204,11 +1251,18 @@ def prepare_window_plot_df(gyro_z_df, window_schedule_df):
 def plot_gyro_window_control(
     gyro_z_L,
     gyro_z_R,
-    window_schedule_L,
-    window_schedule_R
+    window_schedule_common
 ):
-    plot_L = prepare_window_plot_df(gyro_z_L, window_schedule_L)
-    plot_R = prepare_window_plot_df(gyro_z_R, window_schedule_R)
+    plot_L = prepare_window_plot_df(gyro_z_L, window_schedule_common)
+    plot_R = prepare_window_plot_df(gyro_z_R, window_schedule_common)
+
+    plot_window = window_schedule_common.copy()
+    if is_mask == 1:
+        mask = (
+            (plot_window['time_s'] >= limit_min_time)
+            & (plot_window['time_s'] <= limit_max_time)
+        )
+        plot_window = plot_window.loc[mask].reset_index(drop=True)
 
     fig, axes = plt.subplots(
         2,
@@ -1242,14 +1296,14 @@ def plot_gyro_window_control(
         c='k',
         linestyle='--',
         alpha=0.7,
-        label='下降閾値 90 deg/s'
+        label=f'下降閾値 {GYRO_HIGH_THRESHOLD:g} deg/s'
     )
     ax_gyro.axhline(
         GYRO_LOW_THRESHOLD,
         c='k',
         linestyle=':',
         alpha=0.7,
-        label='復帰閾値 65 deg/s'
+        label=f'復帰閾値 {GYRO_LOW_THRESHOLD:g} deg/s'
     )
     add_cod_time_lines_to_axis(ax_gyro)
     ax_gyro.set_ylabel('|Gyz|移動平均 [deg/s]')
@@ -1257,21 +1311,12 @@ def plot_gyro_window_control(
     ax_gyro.legend()
 
     ax_window = axes[1]
-    if len(plot_L) > 0:
+    if len(plot_window) > 0:
         ax_window.plot(
-            plot_L['time_s'],
-            plot_L['window_size'],
-            label='左手 PCA窓幅',
-            c='b',
-            alpha=0.8,
-            drawstyle='steps-post'
-        )
-    if len(plot_R) > 0:
-        ax_window.plot(
-            plot_R['time_s'],
-            plot_R['window_size'],
-            label='右手 PCA窓幅',
-            c='r',
+            plot_window['time_s'],
+            plot_window['window_size'],
+            label='共通 PCA窓幅',
+            c='g',
             alpha=0.8,
             drawstyle='steps-post'
         )
@@ -1282,179 +1327,6 @@ def plot_gyro_window_control(
     ax_window.set_ylim(PCA_WINDOW_MIN - 2, PCA_WINDOW_MAX + 2)
     ax_window.grid(True)
     ax_window.legend()
-
-    plt.tight_layout()
-    plt.show()
-
-
-# 方位角列を一定歩幅の相対軌跡座標へ変換する。
-def heading_to_relative_trajectory(theta_deg, step_length=1.0):
-    theta_rad = np.radians(np.asarray(theta_deg, dtype=float))
-
-    dx = np.cos(theta_rad) * step_length
-    dy = np.sin(theta_rad) * step_length
-
-    x = np.concatenate(([0.0], np.cumsum(dx)))
-    y = np.concatenate(([0.0], np.cumsum(dy)))
-
-    return x, y
-
-
-# 相対軌跡上に方向転換時刻の目印を描画する。
-def plot_direction_change_markers(ax, time_s, x, y):
-    if len(time_s) == 0:
-        return
-
-    time_s = np.asarray(time_s, dtype=float)
-
-    for i, ct in enumerate(cod_times):
-        nearest_index = int(np.argmin(np.abs(time_s - ct)))
-        trajectory_index = min(nearest_index + 1, len(x) - 1)
-        label = '方向変換時刻' if i == 0 else None
-
-        ax.scatter(
-            x[trajectory_index],
-            y[trajectory_index],
-            c='orange',
-            s=28,
-            zorder=5,
-            label=label
-        )
-
-
-# 1つの軸に推定軌跡と真値軌跡を描画する。
-def plot_trajectory_on_axis(
-    ax,
-    heading_R,
-    heading_L,
-    title_str,
-    use_weighted_mean,
-    step_length=1.0
-):
-    plot_data = align_heading_for_plot(
-        heading_R,
-        heading_L,
-        use_weighted_mean=use_weighted_mean
-    )
-
-    if plot_data is None:
-        ax.text(
-            0.5,
-            0.5,
-            'プロットできるデータがありません．',
-            ha='center',
-            va='center',
-            transform=ax.transAxes
-        )
-        ax.set_title(title_str)
-        return
-
-    t_plot = plot_data['time_s']
-
-    x_est, y_est = heading_to_relative_trajectory(
-        plot_data['theta_mean'],
-        step_length=step_length
-    )
-    x_true, y_true = heading_to_relative_trajectory(
-        plot_data['true_heading'],
-        step_length=step_length
-    )
-
-    ax.plot(
-        x_est,
-        y_est,
-        label='推定軌跡',
-        c='tab:blue',
-        linewidth=2,
-        alpha=0.85
-    )
-    ax.plot(
-        x_true,
-        y_true,
-        label='真値軌跡',
-        c='black',
-        linestyle='--',
-        linewidth=1.8,
-        alpha=0.75
-    )
-
-    ax.scatter(
-        x_est[0],
-        y_est[0],
-        c='tab:green',
-        s=42,
-        marker='o',
-        zorder=6,
-        label='開始点'
-    )
-    ax.scatter(
-        x_est[-1],
-        y_est[-1],
-        c='tab:red',
-        s=54,
-        marker='^',
-        zorder=6,
-        label='終了点'
-    )
-
-    plot_direction_change_markers(ax, t_plot, x_est, y_est)
-
-    ax.set_title(title_str)
-    ax.set_xlabel('相対X')
-    ax.set_ylabel('相対Y')
-    ax.axis('equal')
-    ax.grid(True)
-    ax.legend()
-
-
-# 4手法の相対軌跡比較図を2行2列で描画する。
-def plot_relative_trajectory_figure(
-    heading_R_pca_fixed,
-    heading_L_pca_fixed,
-    heading_R_prop_fixed,
-    heading_L_prop_fixed,
-    heading_R_pca_variable,
-    heading_L_pca_variable,
-    heading_R_prop_variable,
-    heading_L_prop_variable
-):
-    fig, axes = plt.subplots(
-        2,
-        2,
-        figsize=(13, 10),
-        squeeze=False
-    )
-
-    fig.suptitle('推定進行方向の模式軌跡', fontsize=16)
-
-    plot_trajectory_on_axis(
-        axes[0, 0],
-        heading_R_pca_fixed,
-        heading_L_pca_fixed,
-        '固定窓 加速度PCA',
-        use_weighted_mean=False
-    )
-    plot_trajectory_on_axis(
-        axes[0, 1],
-        heading_R_prop_fixed,
-        heading_L_prop_fixed,
-        '固定窓 寄与率重み付き加速度PCA',
-        use_weighted_mean=True
-    )
-    plot_trajectory_on_axis(
-        axes[1, 0],
-        heading_R_pca_variable,
-        heading_L_pca_variable,
-        '可変窓 加速度PCA',
-        use_weighted_mean=False
-    )
-    plot_trajectory_on_axis(
-        axes[1, 1],
-        heading_R_prop_variable,
-        heading_L_prop_variable,
-        '可変窓 寄与率重み付き加速度PCA',
-        use_weighted_mean=True
-    )
 
     plt.tight_layout()
     plt.show()
@@ -1488,8 +1360,10 @@ def main():
         initial_heading_deg=90.0
     )
 
-    window_schedule_L = make_window_schedule_from_gyro(gyro_z_L)
-    window_schedule_R = make_window_schedule_from_gyro(gyro_z_R)
+    window_schedule_common = make_common_window_schedule_from_gyro(
+        gyro_z_L,
+        gyro_z_R
+    )
 
     print('\n=== 固定窓PCAを計算中 ===')
     heading_L_pca_fixed = compute_heading_acc_pca_from_synced(
@@ -1518,26 +1392,26 @@ def main():
     heading_L_pca_variable = compute_heading_acc_pca_variable_from_synced(
         sync_L,
         initial_quat_L,
-        window_schedule_L,
+        window_schedule_common,
         use_ratio_weight=False
     )
     heading_R_pca_variable = compute_heading_acc_pca_variable_from_synced(
         sync_R,
         initial_quat_R,
-        window_schedule_R,
+        window_schedule_common,
         use_ratio_weight=False
     )
 
     heading_L_prop_variable = compute_heading_acc_pca_variable_from_synced(
         sync_L,
         initial_quat_L,
-        window_schedule_L,
+        window_schedule_common,
         use_ratio_weight=True
     )
     heading_R_prop_variable = compute_heading_acc_pca_variable_from_synced(
         sync_R,
         initial_quat_R,
-        window_schedule_R,
+        window_schedule_common,
         use_ratio_weight=True
     )
 
@@ -1641,19 +1515,7 @@ def main():
     plot_gyro_window_control(
         gyro_z_L,
         gyro_z_R,
-        window_schedule_L,
-        window_schedule_R
-    )
-
-    plot_relative_trajectory_figure(
-        heading_R_pca_fixed,
-        heading_L_pca_fixed,
-        heading_R_prop_fixed,
-        heading_L_prop_fixed,
-        heading_R_pca_variable,
-        heading_L_pca_variable,
-        heading_R_prop_variable,
-        heading_L_prop_variable
+        window_schedule_common
     )
 
 
