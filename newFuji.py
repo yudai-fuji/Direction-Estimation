@@ -24,39 +24,25 @@ limit_max_time = 39.45
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
-# 固定窓PCAで使う標準のPCA適用窓幅 [サンプル]
 WINDOW_SIZE = 40
 
-# 可変窓PCAで使用するPCA適用窓幅の上限 [サンプル]
 PCA_WINDOW_MAX = 40
 
-# 可変窓PCAで使用するPCA適用窓幅の下限 [サンプル]
 PCA_WINDOW_MIN = 25
 
-# |Gyz|移動平均がこの値を超えたら，PCA窓幅を最小値へ落とす閾値 [deg/s]
 GYRO_HIGH_THRESHOLD = 90.0
 
-# 窓幅低下後，|Gyz|移動平均がこの値以下になったら，窓幅の復帰を開始する閾値 [deg/s]
 GYRO_LOW_THRESHOLD = 65.0
 
-# 復帰中に一度に増やすPCA窓幅 [サンプル]
 WINDOW_RECOVERY_STEP = 3
 
-# 復帰中に何サンプルごとに窓幅を増やすか
 WINDOW_RECOVERY_INTERVAL = 10
 
-# 共通時刻グリッドのサンプリング間隔 [s]．0.02秒 = 50Hz
 SAMPLE_INTERVAL = 0.02
 
-# センサ値を共通時刻へ割り当てるときに許容する最大時間差 [s]
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-# |Gyz|の後方移動平均に使う窓幅 [サンプル]
 GYRO_SMOOTH_WINDOW = 30
-
-THRESHOLD_SEARCH_HIGH_VALUES = [70, 80, 90, 100, 110]
-THRESHOLD_SEARCH_LOW_VALUES = [40, 50, 60, 65, 70]
-THRESHOLD_SEARCH_TOP_N = 5
 
 TIME_ZERO_SENSORS = ['Lacc', 'Gyro', 'GameRo']
 
@@ -69,6 +55,7 @@ PRINT_SYNC_DIAGNOSTICS = True
 # =========================================================
 # Angle utilities
 # =========================================================
+# 角度を-180度以上180度未満の範囲へ正規化する。
 def wrap_pm180(theta_deg):
     if is_mask_g == 1:
         theta_deg = np.asarray(theta_deg, dtype=float)
@@ -77,12 +64,14 @@ def wrap_pm180(theta_deg):
     return theta_deg
 
 
+# 推定角度と真値角度の差を-180度以上180度未満で求める。
 def angle_diff_pm180(pred_deg, true_deg):
     pred_deg = np.asarray(pred_deg, dtype=float)
     true_deg = np.asarray(true_deg, dtype=float)
     return np.mod((pred_deg - true_deg) + 180.0, 360.0) - 180.0
 
 
+# 方向転換時刻と真値方位の設定が妥当か確認する。
 def validate_true_heading_settings():
     if len(cod_times) == 0:
         raise ValueError('cod_times が空です．方向変換時刻を1つ以上設定してください．')
@@ -100,6 +89,7 @@ def validate_true_heading_settings():
         raise ValueError('cod_times は小さい時刻から大きい時刻の順に設定してください．')
 
 
+# 時刻配列に対応する区間ごとの真値方位を作成する。
 def make_true_heading(time_s):
     validate_true_heading_settings()
 
@@ -111,6 +101,7 @@ def make_true_heading(time_s):
     return true_headings_array[segment_index]
 
 
+# グラフ上に方向転換時刻を示す縦線を追加する。
 def add_cod_time_lines_to_axis(ax):
     for i, ct in enumerate(cod_times):
         label = '方向変換時刻' if i == 0 else None
@@ -126,10 +117,12 @@ def add_cod_time_lines_to_axis(ax):
 # =========================================================
 # Quaternion and rotation utilities
 # =========================================================
+# クォータニオンの共役成分を返す。
 def kyoyaku(gx, gy, gz, gw):
     return (-gx, -gy, -gz, gw)
 
 
+# 初期姿勢を基準にした相対クォータニオンを計算する。
 def calc_relative_quaternion(gx, gy, gz, gw, initial_quat):
     gx0, gy0, gz0, gw0 = initial_quat
 
@@ -150,6 +143,7 @@ def calc_relative_quaternion(gx, gy, gz, gw, initial_quat):
     return gwc, gxc, gyc, gzc
 
 
+# GameRoの姿勢情報で3軸ベクトルを初期姿勢基準の座標系へ回転する。
 def rotate_xyz_by_gamero(x, y, z, gx, gy, gz, gw, initial_quat):
     gwc, gxc, gyc, gzc = calc_relative_quaternion(
         gx, gy, gz, gw,
@@ -180,6 +174,7 @@ def rotate_xyz_by_gamero(x, y, z, gx, gy, gz, gw, initial_quat):
 # =========================================================
 # Sensor synchronization
 # =========================================================
+# センサCSVを読み込み，基準時刻からの秒時刻と初期姿勢を取得する。
 def load_sensor_file_with_time(file_path, time_offset_s=0.0):
     df = pd.read_csv(file_path)
 
@@ -212,6 +207,7 @@ def load_sensor_file_with_time(file_path, time_offset_s=0.0):
     return df, initial_quat
 
 
+# 指定センサの有効な時刻範囲を取得する。
 def get_sensor_time_range(df, sensor_name):
     sensor_df = df[df['Sensor'] == sensor_name].copy()
 
@@ -221,6 +217,7 @@ def get_sensor_time_range(df, sensor_name):
     return sensor_df['time_s'].min(), sensor_df['time_s'].max()
 
 
+# 左右センサが共通して持つ時間範囲に等間隔の時刻グリッドを作る。
 def make_common_grid(df_L, df_R, required_sensors):
     starts = []
     ends = []
@@ -250,6 +247,7 @@ def make_common_grid(df_L, df_R, required_sensors):
     return grid_df, overlap_start, overlap_end
 
 
+# 指定センサの値を共通時刻グリッドへ最近傍で割り当てる。
 def nearest_sensor_to_grid(df, sensor_name, grid_df):
     sensor_df = (
         df[df['Sensor'] == sensor_name]
@@ -297,6 +295,7 @@ def nearest_sensor_to_grid(df, sensor_name, grid_df):
     return matched[use_cols]
 
 
+# 片側の複数センサ値を共通時刻グリッド上に同期した表へまとめる。
 def build_synced_side(df, grid_df, required_sensors):
     synced = grid_df.copy()
 
@@ -312,6 +311,7 @@ def build_synced_side(df, grid_df, required_sensors):
     return synced
 
 
+# 同期後データの採用点数や時刻ずれを表示する。
 def print_sync_diagnostics(sync_df, side_label, required_sensors):
     print(f'\n=== {side_label}端末の共通グリッド同期状況 ===')
     print(f'共通グリッド点数: {len(sync_df)}')
@@ -337,6 +337,7 @@ def print_sync_diagnostics(sync_df, side_label, required_sensors):
         )
 
 
+# 左右CSVを読み込み，同期済みデータと初期姿勢をまとめて返す。
 def prepare_synchronized_sensor_data():
     required_sensors = ['Lacc', 'Gyro', 'GameRo']
 
@@ -378,8 +379,8 @@ def prepare_synchronized_sensor_data():
 
 
 # =========================================================
-# Gyro Z moving average and window control
 # =========================================================
+# Z軸角速度の絶対値に移動平均をかける。
 def moving_average_abs_gyro(omega_z_deg_s, smooth_window=10):
     omega_z_deg_s = np.asarray(omega_z_deg_s, dtype=float)
 
@@ -397,6 +398,7 @@ def moving_average_abs_gyro(omega_z_deg_s, smooth_window=10):
     return omega_abs_smooth
 
 
+# ジャイロ値を回転補正し，Z軸角速度とその移動平均を計算する。
 def compute_rotated_gyro_z(sync_df, initial_quat):
     required_cols = [
         'time_s',
@@ -453,6 +455,7 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
     return result
 
 
+# 回転補正したZ軸角速度を時間積分して方位角を推定する。
 def compute_heading_gyro_integral_from_synced(
     sync_df,
     initial_quat,
@@ -505,6 +508,7 @@ def compute_heading_gyro_integral_from_synced(
     return result
 
 
+# 角速度の大きさに応じてPCA窓幅を小さくしたり戻したりする時系列を作る。
 def make_window_schedule_from_gyro(
     gyro_z_df,
     high_threshold=GYRO_HIGH_THRESHOLD,
@@ -563,6 +567,7 @@ def make_window_schedule_from_gyro(
 # =========================================================
 # Acceleration PCA
 # =========================================================
+# 加速度PCA結果が空になる場合の列構造だけを持つDataFrameを作る。
 def empty_acc_pca_df(use_ratio_weight):
     if use_ratio_weight:
         return pd.DataFrame(columns=[
@@ -577,6 +582,7 @@ def empty_acc_pca_df(use_ratio_weight):
     ])
 
 
+# PCA計算用データへ固定窓または可変窓の窓幅を付与する。
 def attach_window_schedule(data, window_schedule_df, default_window_size):
     if window_schedule_df is None:
         data = data.copy()
@@ -602,6 +608,7 @@ def attach_window_schedule(data, window_schedule_df, default_window_size):
     return data
 
 
+# 回転補正した水平加速度にPCAをかけて進行方向を推定する中核処理を行う。
 def compute_acc_pca_core(
     sync_df,
     initial_quat,
@@ -744,6 +751,7 @@ def compute_acc_pca_core(
     return heading_df
 
 
+# 固定窓の通常加速度PCAで進行方向を推定する。
 def compute_heading_acc_pca_from_synced(sync_df, initial_quat, window_size=WINDOW_SIZE):
     return compute_acc_pca_core(
         sync_df,
@@ -754,6 +762,7 @@ def compute_heading_acc_pca_from_synced(sync_df, initial_quat, window_size=WINDO
     )
 
 
+# 固定窓の寄与率重み付き加速度PCAで進行方向を推定する。
 def compute_heading_acc_pca_proposed_from_synced(
     sync_df,
     initial_quat,
@@ -768,6 +777,7 @@ def compute_heading_acc_pca_proposed_from_synced(
     )
 
 
+# 角速度で決めた可変窓を使って加速度PCAの進行方向を推定する。
 def compute_heading_acc_pca_variable_from_synced(
     sync_df,
     initial_quat,
@@ -783,6 +793,7 @@ def compute_heading_acc_pca_variable_from_synced(
     )
 
 
+# ジャイロ積分方位を基準にPCA方位の180度反転を補正する。
 def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False):
     if heading_df is None or len(heading_df) == 0:
         return heading_df
@@ -854,6 +865,7 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
 # =========================================================
 # RMSE and improvement
 # =========================================================
+# 左右それぞれと単純平均の推定方位RMSEを真値に対して計算する。
 def calc_rms_from_headings(heading_R, heading_L):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
@@ -899,6 +911,7 @@ def calc_rms_from_headings(heading_R, heading_L):
     return RMS_R_deg, RMS_L_deg, RMS_mean_deg
 
 
+# 寄与率重み付きベクトル平均を使って左右平均方位のRMSEを計算する。
 def calc_rms_from_weighted_vectors(heading_R, heading_L):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
@@ -946,6 +959,7 @@ def calc_rms_from_weighted_vectors(heading_R, heading_L):
     return RMS_R_deg, RMS_L_deg, RMS_mean_deg
 
 
+# 各手法のRMSE比較表を表示する。
 def print_rmse_table(rmse_rows):
     if len(rmse_rows) == 0:
         print('\n=== RMSE比較 ===')
@@ -966,6 +980,7 @@ def print_rmse_table(rmse_rows):
     print(rmse_df.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
 
 
+# 基準値から新しい値への改善率をパーセントで計算する。
 def improvement_percent(base_value, new_value):
     if not np.isfinite(base_value) or not np.isfinite(new_value):
         return np.nan
@@ -976,6 +991,7 @@ def improvement_percent(base_value, new_value):
     return (base_value - new_value) / base_value * 100.0
 
 
+# RMSE改善率表の1行分を作成する。
 def make_improvement_row(label, base_rmse, new_rmse):
     return [
         label,
@@ -985,6 +1001,7 @@ def make_improvement_row(label, base_rmse, new_rmse):
     ]
 
 
+# RMSE改善率の比較表を表示する。
 def print_improvement_table(improvement_rows):
     if len(improvement_rows) == 0:
         print('\n=== 改善率比較 ===')
@@ -1005,165 +1022,10 @@ def print_improvement_table(improvement_rows):
     print(improvement_df.to_string(index=False, float_format=lambda x: f'{x:.2f}'))
 
 
-def run_threshold_grid_search(
-    sync_L,
-    sync_R,
-    initial_quat_L,
-    initial_quat_R,
-    gyro_z_L,
-    gyro_z_R,
-    gyro_heading_L,
-    gyro_heading_R,
-    high_values=None,
-    low_values=None
-):
-    if high_values is None:
-        high_values = THRESHOLD_SEARCH_HIGH_VALUES
-
-    if low_values is None:
-        low_values = THRESHOLD_SEARCH_LOW_VALUES
-
-    result_rows = []
-
-    for high_threshold in high_values:
-        for low_threshold in low_values:
-            if low_threshold >= high_threshold:
-                continue
-
-            window_schedule_L = make_window_schedule_from_gyro(
-                gyro_z_L,
-                high_threshold=high_threshold,
-                low_threshold=low_threshold
-            )
-            window_schedule_R = make_window_schedule_from_gyro(
-                gyro_z_R,
-                high_threshold=high_threshold,
-                low_threshold=low_threshold
-            )
-
-            heading_L_pca = compute_heading_acc_pca_variable_from_synced(
-                sync_L,
-                initial_quat_L,
-                window_schedule_L,
-                use_ratio_weight=False
-            )
-            heading_R_pca = compute_heading_acc_pca_variable_from_synced(
-                sync_R,
-                initial_quat_R,
-                window_schedule_R,
-                use_ratio_weight=False
-            )
-
-            heading_L_prop = compute_heading_acc_pca_variable_from_synced(
-                sync_L,
-                initial_quat_L,
-                window_schedule_L,
-                use_ratio_weight=True
-            )
-            heading_R_prop = compute_heading_acc_pca_variable_from_synced(
-                sync_R,
-                initial_quat_R,
-                window_schedule_R,
-                use_ratio_weight=True
-            )
-
-            heading_L_pca = resolve_pca_180_by_gyro(
-                heading_L_pca,
-                gyro_heading_L,
-                use_ratio_weight=False
-            )
-            heading_R_pca = resolve_pca_180_by_gyro(
-                heading_R_pca,
-                gyro_heading_R,
-                use_ratio_weight=False
-            )
-            heading_L_prop = resolve_pca_180_by_gyro(
-                heading_L_prop,
-                gyro_heading_L,
-                use_ratio_weight=True
-            )
-            heading_R_prop = resolve_pca_180_by_gyro(
-                heading_R_prop,
-                gyro_heading_R,
-                use_ratio_weight=True
-            )
-
-            acc_rmse = calc_rms_from_headings(
-                heading_R_pca,
-                heading_L_pca
-            )
-            weighted_rmse = calc_rms_from_weighted_vectors(
-                heading_R_prop,
-                heading_L_prop
-            )
-
-            result_rows.append({
-                'HIGH': high_threshold,
-                'LOW': low_threshold,
-                'acc_right_rmse': acc_rmse[0],
-                'acc_left_rmse': acc_rmse[1],
-                'acc_mean_rmse': acc_rmse[2],
-                'weighted_right_rmse': weighted_rmse[0],
-                'weighted_left_rmse': weighted_rmse[1],
-                'weighted_mean_rmse': weighted_rmse[2]
-            })
-
-    return pd.DataFrame(result_rows)
-
-
-def print_threshold_search_top5(search_df, top_n=THRESHOLD_SEARCH_TOP_N):
-    print('\n=== HIGH/LOW閾値探索 ===')
-
-    if search_df is None or len(search_df) == 0:
-        print('表示する探索結果がありません．')
-        return
-
-    print(f'探索した組み合わせ数: {len(search_df)}')
-
-    acc_top = (
-        search_df
-        .sort_values('acc_mean_rmse', ascending=True, na_position='last')
-        .head(top_n)
-    )
-    acc_top = acc_top[[
-        'HIGH',
-        'LOW',
-        'acc_right_rmse',
-        'acc_left_rmse',
-        'acc_mean_rmse'
-    ]].rename(columns={
-        'acc_right_rmse': '右手RMSE',
-        'acc_left_rmse': '左手RMSE',
-        'acc_mean_rmse': '左右平均RMSE'
-    })
-
-    print(f'\n=== HIGH/LOW閾値探索 上位{top_n}件（加速度PCA） ===')
-    print(acc_top.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
-
-    weighted_top = (
-        search_df
-        .sort_values('weighted_mean_rmse', ascending=True, na_position='last')
-        .head(top_n)
-    )
-    weighted_top = weighted_top[[
-        'HIGH',
-        'LOW',
-        'weighted_right_rmse',
-        'weighted_left_rmse',
-        'weighted_mean_rmse'
-    ]].rename(columns={
-        'weighted_right_rmse': '右手RMSE',
-        'weighted_left_rmse': '左手RMSE',
-        'weighted_mean_rmse': '重み付き左右平均RMSE'
-    })
-
-    print(f'\n=== HIGH/LOW閾値探索 上位{top_n}件（寄与率重み付き加速度PCA） ===')
-    print(weighted_top.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
-
-
 # =========================================================
 # Plotting
 # =========================================================
+# 左右の推定方位を時刻でそろえ，描画用の真値と平均方位を作る。
 def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
@@ -1225,6 +1087,7 @@ def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
     }
 
 
+# 1つの軸に左右推定方位，平均方位，真値方位を描画する。
 def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean):
     plot_data = align_heading_for_plot(
         heading_R,
@@ -1273,6 +1136,7 @@ def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean)
     ax.legend()
 
 
+# 通常PCAと寄与率重み付きPCAの方位時系列を横並びで描画する。
 def plot_pca_comparison_figure(
     acc_heading_R,
     acc_heading_L,
@@ -1311,6 +1175,7 @@ def plot_pca_comparison_figure(
     plt.show()
 
 
+# 角速度とPCA窓幅を同じ時刻でまとめ，描画範囲に絞る。
 def prepare_window_plot_df(gyro_z_df, window_schedule_df):
     if gyro_z_df is None or len(gyro_z_df) == 0:
         return pd.DataFrame(columns=[
@@ -1336,6 +1201,7 @@ def prepare_window_plot_df(gyro_z_df, window_schedule_df):
     return plot_df
 
 
+# 角速度移動平均と可変PCA窓幅の変化を描画する。
 def plot_gyro_window_control(
     gyro_z_L,
     gyro_z_R,
@@ -1422,6 +1288,7 @@ def plot_gyro_window_control(
     plt.show()
 
 
+# 方位角列を一定歩幅の相対軌跡座標へ変換する。
 def heading_to_relative_trajectory(theta_deg, step_length=1.0):
     theta_rad = np.radians(np.asarray(theta_deg, dtype=float))
 
@@ -1434,6 +1301,7 @@ def heading_to_relative_trajectory(theta_deg, step_length=1.0):
     return x, y
 
 
+# 相対軌跡上に方向転換時刻の目印を描画する。
 def plot_direction_change_markers(ax, time_s, x, y):
     if len(time_s) == 0:
         return
@@ -1455,6 +1323,7 @@ def plot_direction_change_markers(ax, time_s, x, y):
         )
 
 
+# 1つの軸に推定軌跡と真値軌跡を描画する。
 def plot_trajectory_on_axis(
     ax,
     heading_R,
@@ -1539,6 +1408,7 @@ def plot_trajectory_on_axis(
     ax.legend()
 
 
+# 4手法の相対軌跡比較図を2行2列で描画する。
 def plot_relative_trajectory_figure(
     heading_R_pca_fixed,
     heading_L_pca_fixed,
@@ -1594,6 +1464,7 @@ def plot_relative_trajectory_figure(
 # =========================================================
 # Main
 # =========================================================
+# データ同期から各手法の推定，評価，描画までの全体処理を実行する。
 def main():
     validate_true_heading_settings()
 
@@ -1751,18 +1622,6 @@ def main():
         )
     ]
     print_improvement_table(improvement_rows)
-
-    threshold_search_df = run_threshold_grid_search(
-        sync_L,
-        sync_R,
-        initial_quat_L,
-        initial_quat_R,
-        gyro_z_L,
-        gyro_z_R,
-        gyro_heading_L,
-        gyro_heading_R
-    )
-    print_threshold_search_top5(threshold_search_df)
 
     plot_pca_comparison_figure(
         heading_R_pca_fixed,
