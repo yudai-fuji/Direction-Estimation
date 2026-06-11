@@ -57,6 +57,8 @@ is_mask_g = 1
 
 PRINT_SYNC_DIAGNOSTICS = True
 
+SHOW_INDIVIDUAL_HEADINGS = False
+
 # 角度を-180度以上180度未満の範囲へ正規化する。
 def wrap_pm180(theta_deg):
     if is_mask_g == 1:
@@ -71,6 +73,19 @@ def angle_diff_pm180(pred_deg, true_deg):
     pred_deg = np.asarray(pred_deg, dtype=float)
     true_deg = np.asarray(true_deg, dtype=float)
     return np.mod((pred_deg - true_deg) + 180.0, 360.0) - 180.0
+
+
+def mean_two_headings_by_vector(theta_R_deg, theta_L_deg):
+    theta_R_deg = np.asarray(theta_R_deg, dtype=float)
+    theta_L_deg = np.asarray(theta_L_deg, dtype=float)
+
+    theta_R_rad = np.radians(theta_R_deg)
+    theta_L_rad = np.radians(theta_L_deg)
+
+    x_mean = (np.cos(theta_R_rad) + np.cos(theta_L_rad)) / 2.0
+    y_mean = (np.sin(theta_R_rad) + np.sin(theta_L_rad)) / 2.0
+
+    return np.degrees(np.arctan2(y_mean, x_mean))
 
 
 # 方向転換時刻と真値方位の設定が妥当か確認する。
@@ -931,7 +946,10 @@ def calc_rms_from_headings(heading_R, heading_L):
     if len(aligned) == 0:
         return np.nan, np.nan, np.nan
 
-    theta_mean = (aligned['theta_deg_R'] + aligned['theta_deg_L']) / 2.0
+    theta_mean = mean_two_headings_by_vector(
+        aligned['theta_deg_R'].to_numpy(),
+        aligned['theta_deg_L'].to_numpy()
+    )
 
     t_all = aligned['time_s'].to_numpy()
     mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
@@ -942,7 +960,7 @@ def calc_rms_from_headings(heading_R, heading_L):
     t_eval = t_all[mask]
     theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
     theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean.loc[mask].to_numpy()
+    theta_mean_eval = theta_mean[mask]
 
     true_heading_eval = make_true_heading(t_eval)
 
@@ -1108,7 +1126,10 @@ def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
         ) / 2.0
         theta_mean_plot = np.degrees(np.arctan2(qy_mean, qx_mean))
     else:
-        theta_mean_plot = (theta_R_plot + theta_L_plot) / 2.0
+        theta_mean_plot = mean_two_headings_by_vector(
+            theta_R_plot,
+            theta_L_plot
+        )
 
     true_heading_all = make_true_heading(t_plot)
 
@@ -1155,8 +1176,10 @@ def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean)
 
     t_plot = plot_data['time_s']
 
-    ax.plot(t_plot, plot_data['theta_L'], label='左手の端末', c='b', alpha=0.8)
-    ax.plot(t_plot, plot_data['theta_R'], label='右手の端末', c='r', alpha=0.8)
+    if SHOW_INDIVIDUAL_HEADINGS:
+        ax.plot(t_plot, plot_data['theta_L'], label='左手の端末', c='b', alpha=0.8)
+        ax.plot(t_plot, plot_data['theta_R'], label='右手の端末', c='r', alpha=0.8)
+
     ax.plot(
         t_plot,
         plot_data['theta_mean'],
