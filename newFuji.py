@@ -25,7 +25,7 @@ limit_max_time = 39.45
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
 #固定窓のPCA適用本数
-WINDOW_SIZE = 40
+WINDOW_SIZE = 30
 
 # 可変窓のPCA適用本数の最大値と最小値
 PCA_WINDOW_MAX = 50
@@ -59,6 +59,10 @@ PRINT_SYNC_DIAGNOSTICS = True
 
 SHOW_INDIVIDUAL_HEADINGS = False
 
+APPLY_PLOT_HEADING_LOWPASS = True
+PLOT_HEADING_LOWPASS_ALPHA = 0.1
+
+
 # 角度を-180度以上180度未満の範囲へ正規化する。
 def wrap_pm180(theta_deg):
     if is_mask_g == 1:
@@ -86,6 +90,31 @@ def mean_two_headings_by_vector(theta_R_deg, theta_L_deg):
     y_mean = (np.sin(theta_R_rad) + np.sin(theta_L_rad)) / 2.0
 
     return np.degrees(np.arctan2(y_mean, x_mean))
+
+
+def lowpass_heading_for_plot(theta_deg, alpha):
+    if not (0.0 < alpha <= 1.0):
+        raise ValueError('PLOT_HEADING_LOWPASS_ALPHA は 0 より大きく 1 以下にしてください。')
+
+    theta_deg = np.asarray(theta_deg, dtype=float)
+
+    if len(theta_deg) == 0:
+        return theta_deg
+
+    theta_rad = np.radians(theta_deg)
+    x = np.cos(theta_rad)
+    y = np.sin(theta_rad)
+
+    x_filtered = np.empty_like(x)
+    y_filtered = np.empty_like(y)
+    x_filtered[0] = x[0]
+    y_filtered[0] = y[0]
+
+    for i in range(1, len(theta_deg)):
+        x_filtered[i] = x_filtered[i - 1] + alpha * (x[i] - x_filtered[i - 1])
+        y_filtered[i] = y_filtered[i - 1] + alpha * (y[i] - y_filtered[i - 1])
+
+    return np.degrees(np.arctan2(y_filtered, x_filtered))
 
 
 # 方向転換時刻と真値方位の設定が妥当か確認する。
@@ -1145,6 +1174,12 @@ def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
     if len(t_plot) == 0:
         return None
 
+    if APPLY_PLOT_HEADING_LOWPASS:
+        theta_mean_plot = lowpass_heading_for_plot(
+            theta_mean_plot,
+            PLOT_HEADING_LOWPASS_ALPHA
+        )
+
     return {
         'time_s': t_plot,
         'theta_R': wrap_pm180(theta_R_plot),
@@ -1180,10 +1215,12 @@ def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean)
         ax.plot(t_plot, plot_data['theta_L'], label='左手の端末', c='b', alpha=0.8)
         ax.plot(t_plot, plot_data['theta_R'], label='右手の端末', c='r', alpha=0.8)
 
+    mean_label = '左右平均（LPF）' if APPLY_PLOT_HEADING_LOWPASS else '左右平均'
+
     ax.plot(
         t_plot,
         plot_data['theta_mean'],
-        label='左右平均',
+        label=mean_label,
         c='g',
         linewidth=2,
         alpha=0.8
