@@ -25,7 +25,7 @@ limit_max_time = 39.45
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
 #固定窓のPCA適用本数
-WINDOW_SIZE = 30
+WINDOW_SIZE = 40
 
 # 可変窓のPCA適用本数の最大値と最小値
 PCA_WINDOW_MAX = 50
@@ -48,7 +48,10 @@ SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-GYRO_SMOOTH_WINDOW = 30
+GYRO_SMOOTH_WINDOW = 60
+
+# ジャイロの移動平均を絶対値で使うかどうか。Trueなら絶対値の移動平均，Falseなら移動平均の絶対値を使う
+USE_ABS_GYRO_SMOOTH = False
 
 TIME_ZERO_SENSORS = ['Lacc', 'Gyro', 'GameRo']
 
@@ -441,6 +444,24 @@ def moving_average_abs_gyro(omega_z_deg_s, smooth_window=10):
     return omega_abs_smooth
 
 
+# Z軸角速度を符号つきのまま移動平均にかける。
+def moving_average_gyro(omega_z_deg_s, smooth_window=10):
+    omega_z_deg_s = np.asarray(omega_z_deg_s, dtype=float)
+
+    omega_smooth = (
+        pd.Series(omega_z_deg_s)
+        .rolling(
+            window=smooth_window,
+            center=False,
+            min_periods=1
+        )
+        .mean()
+        .to_numpy()
+    )
+
+    return omega_smooth
+
+
 # ジャイロ値を回転補正し，Z軸角速度とその移動平均を計算する。
 def compute_rotated_gyro_z(sync_df, initial_quat):
     required_cols = [
@@ -462,7 +483,9 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
                 'time_s',
                 'Gyz_deg_s',
                 'abs_Gyz_deg_s',
-                'abs_Gyz_smooth_deg_s'
+                'Gyz_smooth_deg_s',
+                'abs_Gyz_smooth_deg_s',
+                'gyro_control_smooth_deg_s'
             ]
         )
 
@@ -483,16 +506,26 @@ def compute_rotated_gyro_z(sync_df, initial_quat):
 
     Gyz_deg_s = Gyz * 180.0 / math.pi
     abs_Gyz_deg_s = np.abs(Gyz_deg_s)
+    Gyz_smooth_deg_s = moving_average_gyro(
+        Gyz_deg_s,
+        smooth_window=GYRO_SMOOTH_WINDOW
+    )
     abs_Gyz_smooth_deg_s = moving_average_abs_gyro(
         Gyz_deg_s,
         smooth_window=GYRO_SMOOTH_WINDOW
     )
+    if USE_ABS_GYRO_SMOOTH:
+        gyro_control_smooth_deg_s = abs_Gyz_smooth_deg_s
+    else:
+        gyro_control_smooth_deg_s = np.abs(Gyz_smooth_deg_s)
 
     result = pd.DataFrame({
         'time_s': data['time_s'].to_numpy(),
         'Gyz_deg_s': Gyz_deg_s,
         'abs_Gyz_deg_s': abs_Gyz_deg_s,
-        'abs_Gyz_smooth_deg_s': abs_Gyz_smooth_deg_s
+        'Gyz_smooth_deg_s': Gyz_smooth_deg_s,
+        'abs_Gyz_smooth_deg_s': abs_Gyz_smooth_deg_s,
+        'gyro_control_smooth_deg_s': gyro_control_smooth_deg_s
     })
 
     return result
@@ -560,12 +593,12 @@ def make_window_schedule_from_gyro(
     if gyro_z_df is None or len(gyro_z_df) == 0:
         return pd.DataFrame(columns=[
             'time_s',
-            'abs_Gyz_smooth_deg_s',
+            'gyro_control_smooth_deg_s',
             'window_size'
         ])
 
     data = (
-        gyro_z_df[['time_s', 'abs_Gyz_smooth_deg_s']]
+        gyro_z_df[['time_s', 'gyro_control_smooth_deg_s']]
         .copy()
         .sort_values('time_s')
         .reset_index(drop=True)
@@ -576,14 +609,14 @@ def make_window_schedule_from_gyro(
     recovery_count = 0
     window_list = []
 
-    for omega_abs_smooth in data['abs_Gyz_smooth_deg_s'].to_numpy():
-        if omega_abs_smooth > high_threshold:
+    for omega_control_smooth in data['gyro_control_smooth_deg_s'].to_numpy():
+        if omega_control_smooth > high_threshold:
             current_window = PCA_WINDOW_MIN
             state = 'suppressed'
             recovery_count = 0
 
         elif current_window < PCA_WINDOW_MAX:
-            if state == 'suppressed' and omega_abs_smooth <= low_threshold:
+            if state == 'suppressed' and omega_control_smooth <= low_threshold:
                 state = 'recovering'
                 recovery_count = 0
 
@@ -616,16 +649,16 @@ def make_common_window_schedule_from_gyro(gyro_z_L, gyro_z_R):
         return make_window_schedule_from_gyro(gyro_z_L)
 
     left = (
-        gyro_z_L[['time_s', 'abs_Gyz_smooth_deg_s']]
+        gyro_z_L[['time_s', 'gyro_control_smooth_deg_s']]
         .copy()
-        .rename(columns={'abs_Gyz_smooth_deg_s': 'abs_Gyz_smooth_deg_s_L'})
+        .rename(columns={'gyro_control_smooth_deg_s': 'gyro_control_smooth_deg_s_L'})
         .sort_values('time_s')
         .reset_index(drop=True)
     )
     right = (
-        gyro_z_R[['time_s', 'abs_Gyz_smooth_deg_s']]
+        gyro_z_R[['time_s', 'gyro_control_smooth_deg_s']]
         .copy()
-        .rename(columns={'abs_Gyz_smooth_deg_s': 'abs_Gyz_smooth_deg_s_R'})
+        .rename(columns={'gyro_control_smooth_deg_s': 'gyro_control_smooth_deg_s_R'})
         .sort_values('time_s')
         .reset_index(drop=True)
     )
@@ -640,17 +673,17 @@ def make_common_window_schedule_from_gyro(gyro_z_L, gyro_z_R):
     if len(common_gyro) == 0:
         return pd.DataFrame(columns=[
             'time_s',
-            'abs_Gyz_smooth_deg_s',
+            'gyro_control_smooth_deg_s',
             'window_size'
         ])
 
-    common_gyro['abs_Gyz_smooth_deg_s'] = common_gyro[[
-        'abs_Gyz_smooth_deg_s_L',
-        'abs_Gyz_smooth_deg_s_R'
+    common_gyro['gyro_control_smooth_deg_s'] = common_gyro[[
+        'gyro_control_smooth_deg_s_L',
+        'gyro_control_smooth_deg_s_R'
     ]].max(axis=1)
 
     return make_window_schedule_from_gyro(
-        common_gyro[['time_s', 'abs_Gyz_smooth_deg_s']]
+        common_gyro[['time_s', 'gyro_control_smooth_deg_s']]
     )
 
 
@@ -1282,16 +1315,23 @@ def plot_pca_comparison_figure(
 
 
 # 角速度とPCA窓幅を同じ時刻でまとめ，描画範囲に絞る。
+def get_gyro_control_label():
+    if USE_ABS_GYRO_SMOOTH:
+        return '|Gyz|移動平均'
+
+    return '生Gyz移動平均の絶対値'
+
+
 def prepare_window_plot_df(gyro_z_df, window_schedule_df):
     if gyro_z_df is None or len(gyro_z_df) == 0:
         return pd.DataFrame(columns=[
             'time_s',
-            'abs_Gyz_smooth_deg_s',
+            'gyro_control_smooth_deg_s',
             'window_size'
         ])
 
     plot_df = pd.merge(
-        gyro_z_df[['time_s', 'abs_Gyz_smooth_deg_s']],
+        gyro_z_df[['time_s', 'gyro_control_smooth_deg_s']],
         window_schedule_df[['time_s', 'window_size']],
         on='time_s',
         how='left'
@@ -1334,19 +1374,20 @@ def plot_gyro_window_control(
     fig.suptitle('角速度移動平均と可変PCA窓幅', fontsize=16)
 
     ax_gyro = axes[0]
+    gyro_control_label = get_gyro_control_label()
     if len(plot_L) > 0:
         ax_gyro.plot(
             plot_L['time_s'],
-            plot_L['abs_Gyz_smooth_deg_s'],
-            label='左手 |Gyz|移動平均',
+            plot_L['gyro_control_smooth_deg_s'],
+            label=f'左手 {gyro_control_label}',
             c='b',
             alpha=0.8
         )
     if len(plot_R) > 0:
         ax_gyro.plot(
             plot_R['time_s'],
-            plot_R['abs_Gyz_smooth_deg_s'],
-            label='右手 |Gyz|移動平均',
+            plot_R['gyro_control_smooth_deg_s'],
+            label=f'右手 {gyro_control_label}',
             c='r',
             alpha=0.8
         )
@@ -1366,7 +1407,7 @@ def plot_gyro_window_control(
         label=f'復帰閾値 {GYRO_LOW_THRESHOLD:g} deg/s'
     )
     add_cod_time_lines_to_axis(ax_gyro)
-    ax_gyro.set_ylabel('|Gyz|移動平均 [deg/s]')
+    ax_gyro.set_ylabel(f'{gyro_control_label} [deg/s]')
     ax_gyro.grid(True)
     ax_gyro.legend()
 
