@@ -15,12 +15,12 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260518栁澤共同研究/YwL5.csv'
-file_R = r'260518栁澤共同研究/YwR5.csv'
-delay_time = 3.338094
-cod_times = [19.12, 23.52, 32.87]
-limit_min_time = 10.26
-limit_max_time = 36.64
+file_L = r'260518栁澤共同研究/YwL4.csv'
+file_R = r'260518栁澤共同研究/YwR4.csv'
+delay_time = 2.986508
+cod_times = [18.56, 23.31, 32.74]
+limit_min_time = 9.98
+limit_max_time = 36.85
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
@@ -66,8 +66,9 @@ SHOW_INDIVIDUAL_HEADINGS = False
 # 推定結果を点で表示するか
 PLOT_HEADING_AS_POINTS = True
 
-APPLY_PLOT_HEADING_LOWPASS = False
-PLOT_HEADING_LOWPASS_ALPHA = 0.1
+# 回転後の水平加速度にローパスフィルタをかけてからPCAに渡すか
+APPLY_ACC_LOWPASS = True
+ACC_LOWPASS_ALPHA = 0.2
 
 
 # 角度を-180度以上180度未満の範囲へ正規化する。
@@ -99,29 +100,22 @@ def mean_two_headings_by_vector(theta_R_deg, theta_L_deg):
     return np.degrees(np.arctan2(y_mean, x_mean))
 
 
-def lowpass_heading_for_plot(theta_deg, alpha):
+def exponential_lowpass(values, alpha):
     if not (0.0 < alpha <= 1.0):
-        raise ValueError('PLOT_HEADING_LOWPASS_ALPHA は 0 より大きく 1 以下にしてください。')
+        raise ValueError('ACC_LOWPASS_ALPHA は 0 より大きく 1 以下にしてください。')
 
-    theta_deg = np.asarray(theta_deg, dtype=float)
+    values = np.asarray(values, dtype=float)
 
-    if len(theta_deg) == 0:
-        return theta_deg
+    if len(values) == 0:
+        return values
 
-    theta_rad = np.radians(theta_deg)
-    x = np.cos(theta_rad)
-    y = np.sin(theta_rad)
+    filtered = np.empty_like(values)
+    filtered[0] = values[0]
 
-    x_filtered = np.empty_like(x)
-    y_filtered = np.empty_like(y)
-    x_filtered[0] = x[0]
-    y_filtered[0] = y[0]
+    for i in range(1, len(values)):
+        filtered[i] = filtered[i - 1] + alpha * (values[i] - filtered[i - 1])
 
-    for i in range(1, len(theta_deg)):
-        x_filtered[i] = x_filtered[i - 1] + alpha * (x[i] - x_filtered[i - 1])
-        y_filtered[i] = y_filtered[i - 1] + alpha * (y[i] - y_filtered[i - 1])
-
-    return np.degrees(np.arctan2(y_filtered, x_filtered))
+    return filtered
 
 
 # 方向転換時刻と真値方位の設定が妥当か確認する。
@@ -813,8 +807,12 @@ def compute_acc_pca_core(
     time_data = data['time_s'].to_numpy()
     window_data = data['window_size'].to_numpy(dtype=int)
 
-    x_rotated = Ax
-    y_rotated = Ay
+    if APPLY_ACC_LOWPASS:
+        x_rotated = exponential_lowpass(Ax, ACC_LOWPASS_ALPHA)
+        y_rotated = exponential_lowpass(Ay, ACC_LOWPASS_ALPHA)
+    else:
+        x_rotated = Ax
+        y_rotated = Ay
 
     pca = PCA(n_components=2)
 
@@ -1293,12 +1291,6 @@ def align_heading_for_plot(
     if len(t_plot) == 0:
         return None
 
-    if APPLY_PLOT_HEADING_LOWPASS:
-        theta_mean_plot = lowpass_heading_for_plot(
-            theta_mean_plot,
-            PLOT_HEADING_LOWPASS_ALPHA
-        )
-
     return {
         'time_s': t_plot,
         'theta_R': wrap_pm180(theta_R_plot),
@@ -1377,7 +1369,7 @@ def plot_heading_on_axis(
             marker_size=8
         )
 
-    mean_label = '左右平均（LPF）' if APPLY_PLOT_HEADING_LOWPASS else '左右平均'
+    mean_label = '左右平均'
 
     plot_heading_estimate(
         ax,
@@ -1548,14 +1540,14 @@ def plot_gyro_window_control(
         c='k',
         linestyle='--',
         alpha=0.7,
-        label=f'下降閾値 {GYRO_HIGH_THRESHOLD:g} deg/s'
+        label=f'方向転換閾値 {GYRO_HIGH_THRESHOLD:g} deg/s'
     )
     ax_gyro.axhline(
         GYRO_LOW_THRESHOLD,
         c='k',
         linestyle=':',
         alpha=0.7,
-        label=f'復帰閾値 {GYRO_LOW_THRESHOLD:g} deg/s'
+        label=f'直進閾値 {GYRO_LOW_THRESHOLD:g} deg/s'
     )
     add_cod_time_lines_to_axis(ax_gyro)
     ax_gyro.set_ylabel(f'{gyro_control_label} [deg/s]')
