@@ -15,12 +15,12 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260518栁澤共同研究/KL1.csv'
-file_R = r'260518栁澤共同研究/KR1.csv'
-delay_time = 0.892716
-cod_times = [20.61, 25.41, 35.54]
-limit_min_time = 12.27
-limit_max_time = 39.45
+file_L = r'260518栁澤共同研究/YwL5.csv'
+file_R = r'260518栁澤共同研究/YwR5.csv'
+delay_time = 3.338094
+cod_times = [19.12, 23.52, 32.87]
+limit_min_time = 10.26
+limit_max_time = 36.64
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
@@ -32,10 +32,10 @@ PCA_WINDOW_MAX = 50
 PCA_WINDOW_MIN = 25
 
 # ジャイロの移動平均絶対値がこの値を超えたら窓幅を最小にする。
-GYRO_HIGH_THRESHOLD = 110
+GYRO_HIGH_THRESHOLD = 60
 
 # ジャイロの移動平均絶対値がこの値を下回ったら窓幅回復開始の条件を満たす。
-GYRO_LOW_THRESHOLD = 70
+GYRO_LOW_THRESHOLD = 30
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
 WINDOW_RECOVERY_STEP = 3
@@ -50,7 +50,7 @@ NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
 GYRO_SMOOTH_WINDOW = 60
 
-# ジャイロの移動平均を絶対値で使うかどうか。Trueなら絶対値の移動平均，Falseなら移動平均の絶対値を使う
+# ジャイロの移動平均を絶対値で使うかどうか。Trueなら絶対値の移動平均，Falseなら生データの移動平均の絶対値を使う
 USE_ABS_GYRO_SMOOTH = False
 
 TIME_ZERO_SENSORS = ['Lacc', 'Gyro', 'GameRo']
@@ -60,9 +60,13 @@ is_mask_g = 1
 
 PRINT_SYNC_DIAGNOSTICS = True
 
+# 左右単体の結果も表示させるか
 SHOW_INDIVIDUAL_HEADINGS = False
 
-APPLY_PLOT_HEADING_LOWPASS = True
+# 推定結果を点で表示するか
+PLOT_HEADING_AS_POINTS = True
+
+APPLY_PLOT_HEADING_LOWPASS = False
 PLOT_HEADING_LOWPASS_ALPHA = 0.1
 
 
@@ -584,6 +588,33 @@ def compute_heading_gyro_integral_from_synced(
     return result
 
 
+def make_gyro_mean_heading(gyro_heading_R, gyro_heading_L):
+    if gyro_heading_R is None or gyro_heading_L is None:
+        return pd.DataFrame(columns=['time_s', 'theta_deg'])
+
+    aligned = pd.merge(
+        gyro_heading_R[['time_s', 'theta_deg']],
+        gyro_heading_L[['time_s', 'theta_deg']],
+        on='time_s',
+        how='inner',
+        suffixes=('_R', '_L')
+    )
+
+    aligned = aligned.dropna(
+        subset=['theta_deg_R', 'theta_deg_L']
+    ).sort_values('time_s').reset_index(drop=True)
+
+    if len(aligned) == 0:
+        return pd.DataFrame(columns=['time_s', 'theta_deg'])
+
+    aligned['theta_deg'] = (
+        aligned['theta_deg_R'].to_numpy()
+        + aligned['theta_deg_L'].to_numpy()
+    ) / 2.0
+
+    return aligned[['time_s', 'theta_deg']]
+
+
 # 角速度の大きさに応じてPCA窓幅を小さくしたり戻したりする時系列を作る。
 def make_window_schedule_from_gyro(
     gyro_z_df,
@@ -942,7 +973,7 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
         heading,
         gyro,
         on='time_s',
-        direction='nearest',
+        direction='backward',
         tolerance=NEAREST_TOLERANCE
     )
 
@@ -988,7 +1019,7 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
 # =========================================================
 # RMSE and improvement
 # =========================================================
-# 左右それぞれと単純平均の推定方位RMSEを真値に対して計算する。
+# 左右それぞれとベクトル平均の推定方位RMSEを真値に対して計算する。
 def calc_rms_from_headings(heading_R, heading_L):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
@@ -1012,6 +1043,54 @@ def calc_rms_from_headings(heading_R, heading_L):
         aligned['theta_deg_R'].to_numpy(),
         aligned['theta_deg_L'].to_numpy()
     )
+
+    t_all = aligned['time_s'].to_numpy()
+    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
+
+    if np.sum(mask) == 0:
+        return np.nan, np.nan, np.nan
+
+    t_eval = t_all[mask]
+    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
+    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
+    theta_mean_eval = theta_mean[mask]
+
+    true_heading_eval = make_true_heading(t_eval)
+
+    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
+    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
+    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
+
+    RMS_R_deg = np.sqrt(np.mean(err_R**2))
+    RMS_L_deg = np.sqrt(np.mean(err_L**2))
+    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
+
+    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
+
+
+def calc_rms_from_headings_simple_mean(heading_R, heading_L):
+    heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
+    heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
+
+    aligned = pd.merge(
+        heading_R,
+        heading_L,
+        on='time_s',
+        how='inner',
+        suffixes=('_R', '_L')
+    )
+
+    aligned = aligned.dropna(
+        subset=['theta_deg_R', 'theta_deg_L']
+    ).reset_index(drop=True)
+
+    if len(aligned) == 0:
+        return np.nan, np.nan, np.nan
+
+    theta_mean = (
+        aligned['theta_deg_R'].to_numpy()
+        + aligned['theta_deg_L'].to_numpy()
+    ) / 2.0
 
     t_all = aligned['time_s'].to_numpy()
     mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
@@ -1152,7 +1231,12 @@ def print_improvement_table(improvement_rows):
 # Plotting
 # =========================================================
 # 左右の推定方位を時刻でそろえ，描画用の真値と平均方位を作る。
-def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
+def align_heading_for_plot(
+    heading_R,
+    heading_L,
+    use_weighted_mean,
+    use_simple_mean=False
+):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
 
@@ -1187,6 +1271,8 @@ def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
             + aligned['qy_L'].to_numpy()
         ) / 2.0
         theta_mean_plot = np.degrees(np.arctan2(qy_mean, qx_mean))
+    elif use_simple_mean:
+        theta_mean_plot = (theta_R_plot + theta_L_plot) / 2.0
     else:
         theta_mean_plot = mean_two_headings_by_vector(
             theta_R_plot,
@@ -1222,12 +1308,41 @@ def align_heading_for_plot(heading_R, heading_L, use_weighted_mean):
     }
 
 
+def plot_heading_estimate(ax, t_plot, theta_plot, label, color, marker_size=12):
+    if PLOT_HEADING_AS_POINTS:
+        ax.scatter(
+            t_plot,
+            theta_plot,
+            label=label,
+            c=color,
+            s=marker_size,
+            alpha=0.75,
+            edgecolors='none'
+        )
+    else:
+        ax.plot(
+            t_plot,
+            theta_plot,
+            label=label,
+            c=color,
+            alpha=0.8
+        )
+
+
 # 1つの軸に左右推定方位，平均方位，真値方位を描画する。
-def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean):
+def plot_heading_on_axis(
+    ax,
+    heading_R,
+    heading_L,
+    title_str,
+    use_weighted_mean,
+    use_simple_mean=False
+):
     plot_data = align_heading_for_plot(
         heading_R,
         heading_L,
-        use_weighted_mean=use_weighted_mean
+        use_weighted_mean=use_weighted_mean,
+        use_simple_mean=use_simple_mean
     )
 
     if plot_data is None:
@@ -1245,18 +1360,32 @@ def plot_heading_on_axis(ax, heading_R, heading_L, title_str, use_weighted_mean)
     t_plot = plot_data['time_s']
 
     if SHOW_INDIVIDUAL_HEADINGS:
-        ax.plot(t_plot, plot_data['theta_L'], label='左手の端末', c='b', alpha=0.8)
-        ax.plot(t_plot, plot_data['theta_R'], label='右手の端末', c='r', alpha=0.8)
+        plot_heading_estimate(
+            ax,
+            t_plot,
+            plot_data['theta_L'],
+            label='左手の端末',
+            color='b',
+            marker_size=8
+        )
+        plot_heading_estimate(
+            ax,
+            t_plot,
+            plot_data['theta_R'],
+            label='右手の端末',
+            color='r',
+            marker_size=8
+        )
 
     mean_label = '左右平均（LPF）' if APPLY_PLOT_HEADING_LOWPASS else '左右平均'
 
-    ax.plot(
+    plot_heading_estimate(
+        ax,
         t_plot,
         plot_data['theta_mean'],
         label=mean_label,
-        c='g',
-        linewidth=2,
-        alpha=0.8
+        color='g',
+        marker_size=12
     )
     ax.plot(
         t_plot,
@@ -1310,6 +1439,28 @@ def plot_pca_comparison_figure(
         use_weighted_mean=True
     )
 
+    plt.tight_layout()
+    plt.show()
+
+
+# 角速度累積法の左右単体と左右平均を描画する。
+def plot_gyro_heading_figure(gyro_heading_R, gyro_heading_L):
+    fig, ax = plt.subplots(
+        1,
+        1,
+        figsize=(12, 6)
+    )
+
+    plot_heading_on_axis(
+        ax,
+        gyro_heading_R,
+        gyro_heading_L,
+        '角速度累積法',
+        use_weighted_mean=False,
+        use_simple_mean=True
+    )
+
+    fig.suptitle('時系列変化（角速度累積法）', fontsize=16)
     plt.tight_layout()
     plt.show()
 
@@ -1460,6 +1611,10 @@ def main():
         initial_quat_R,
         initial_heading_deg=90.0
     )
+    gyro_mean_heading = make_gyro_mean_heading(
+        gyro_heading_R,
+        gyro_heading_L
+    )
 
     window_schedule_common = make_common_window_schedule_from_gyro(
         gyro_z_L,
@@ -1519,45 +1674,49 @@ def main():
     print('\n=== 角速度累積法を用いたPCA 180度補正中 ===')
     heading_L_pca_fixed = resolve_pca_180_by_gyro(
         heading_L_pca_fixed,
-        gyro_heading_L,
+        gyro_mean_heading,
         use_ratio_weight=False
     )
     heading_R_pca_fixed = resolve_pca_180_by_gyro(
         heading_R_pca_fixed,
-        gyro_heading_R,
+        gyro_mean_heading,
         use_ratio_weight=False
     )
     heading_L_prop_fixed = resolve_pca_180_by_gyro(
         heading_L_prop_fixed,
-        gyro_heading_L,
+        gyro_mean_heading,
         use_ratio_weight=True
     )
     heading_R_prop_fixed = resolve_pca_180_by_gyro(
         heading_R_prop_fixed,
-        gyro_heading_R,
+        gyro_mean_heading,
         use_ratio_weight=True
     )
     heading_L_pca_variable = resolve_pca_180_by_gyro(
         heading_L_pca_variable,
-        gyro_heading_L,
+        gyro_mean_heading,
         use_ratio_weight=False
     )
     heading_R_pca_variable = resolve_pca_180_by_gyro(
         heading_R_pca_variable,
-        gyro_heading_R,
+        gyro_mean_heading,
         use_ratio_weight=False
     )
     heading_L_prop_variable = resolve_pca_180_by_gyro(
         heading_L_prop_variable,
-        gyro_heading_L,
+        gyro_mean_heading,
         use_ratio_weight=True
     )
     heading_R_prop_variable = resolve_pca_180_by_gyro(
         heading_R_prop_variable,
-        gyro_heading_R,
+        gyro_mean_heading,
         use_ratio_weight=True
     )
 
+    gyro_integral_rmse = calc_rms_from_headings_simple_mean(
+        gyro_heading_R,
+        gyro_heading_L
+    )
     fixed_acc_rmse = calc_rms_from_headings(
         heading_R_pca_fixed,
         heading_L_pca_fixed
@@ -1576,6 +1735,7 @@ def main():
     )
 
     rmse_rows = [
+        ['角速度累積法', *gyro_integral_rmse],
         ['固定窓 加速度PCA', *fixed_acc_rmse],
         ['固定窓 寄与率重み付き加速度PCA', *fixed_prop_rmse],
         ['可変窓 加速度PCA', *variable_acc_rmse],
@@ -1596,6 +1756,11 @@ def main():
         )
     ]
     print_improvement_table(improvement_rows)
+
+    plot_gyro_heading_figure(
+        gyro_heading_R,
+        gyro_heading_L
+    )
 
     plot_pca_comparison_figure(
         heading_R_pca_fixed,
