@@ -31,11 +31,11 @@ WINDOW_SIZE = 40
 PCA_WINDOW_MAX = 50
 PCA_WINDOW_MIN = 25
 
-# ジャイロの移動平均絶対値がこの値を超えたら窓幅を最小にする。
-GYRO_HIGH_THRESHOLD = 60
+# 第一主成分の寄与率がこの値を下回ったら窓幅を最小にする。
+PCA_PC1_LOW_THRESHOLD = 0.810
 
-# ジャイロの移動平均絶対値がこの値を下回ったら窓幅回復開始の条件を満たす。
-GYRO_LOW_THRESHOLD = 30
+# 左右両方の第一主成分寄与率がこの値を上回ったら窓幅回復の条件を満たす。
+PCA_PC1_HIGH_THRESHOLD = 0.828
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
 WINDOW_RECOVERY_STEP = 3
@@ -47,11 +47,6 @@ WINDOW_RECOVERY_INTERVAL = 10
 SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
-
-GYRO_SMOOTH_WINDOW = 60
-
-# ジャイロの移動平均を絶対値で使うかどうか。Trueなら絶対値の移動平均，Falseなら生データの移動平均の絶対値を使う
-USE_ABS_GYRO_SMOOTH = False
 
 TIME_ZERO_SENSORS = ['Lacc', 'Gyro', 'GameRo']
 
@@ -422,113 +417,6 @@ def prepare_synchronized_sensor_data():
     }
 
 
-# =========================================================
-# =========================================================
-# Z軸角速度の絶対値に移動平均をかける。
-def moving_average_abs_gyro(omega_z_deg_s, smooth_window=10):
-    omega_z_deg_s = np.asarray(omega_z_deg_s, dtype=float)
-
-    omega_abs_smooth = (
-        pd.Series(np.abs(omega_z_deg_s))
-        .rolling(
-            window=smooth_window,
-            center=False,
-            min_periods=1
-        )
-        .mean()
-        .to_numpy()
-    )
-
-    return omega_abs_smooth
-
-
-# Z軸角速度を符号つきのまま移動平均にかける。
-def moving_average_gyro(omega_z_deg_s, smooth_window=10):
-    omega_z_deg_s = np.asarray(omega_z_deg_s, dtype=float)
-
-    omega_smooth = (
-        pd.Series(omega_z_deg_s)
-        .rolling(
-            window=smooth_window,
-            center=False,
-            min_periods=1
-        )
-        .mean()
-        .to_numpy()
-    )
-
-    return omega_smooth
-
-
-# ジャイロ値を回転補正し，Z軸角速度とその移動平均を計算する。
-def compute_rotated_gyro_z(sync_df, initial_quat):
-    required_cols = [
-        'time_s',
-        'Gyro_X', 'Gyro_Y', 'Gyro_Z',
-        'GameRo_X', 'GameRo_Y', 'GameRo_Z', 'GameRo_W'
-    ]
-
-    data = (
-        sync_df
-        .dropna(subset=required_cols)
-        .copy()
-        .reset_index(drop=True)
-    )
-
-    if len(data) == 0:
-        return pd.DataFrame(
-            columns=[
-                'time_s',
-                'Gyz_deg_s',
-                'abs_Gyz_deg_s',
-                'Gyz_smooth_deg_s',
-                'abs_Gyz_smooth_deg_s',
-                'gyro_control_smooth_deg_s'
-            ]
-        )
-
-    gyx = data['Gyro_X'].to_numpy()
-    gyy = data['Gyro_Y'].to_numpy()
-    gyz = data['Gyro_Z'].to_numpy()
-
-    gx = data['GameRo_X'].to_numpy()
-    gy = data['GameRo_Y'].to_numpy()
-    gz = data['GameRo_Z'].to_numpy()
-    gw = data['GameRo_W'].to_numpy()
-
-    _, _, Gyz = rotate_xyz_by_gamero(
-        gyx, gyy, gyz,
-        gx, gy, gz, gw,
-        initial_quat
-    )
-
-    Gyz_deg_s = Gyz * 180.0 / math.pi
-    abs_Gyz_deg_s = np.abs(Gyz_deg_s)
-    Gyz_smooth_deg_s = moving_average_gyro(
-        Gyz_deg_s,
-        smooth_window=GYRO_SMOOTH_WINDOW
-    )
-    abs_Gyz_smooth_deg_s = moving_average_abs_gyro(
-        Gyz_deg_s,
-        smooth_window=GYRO_SMOOTH_WINDOW
-    )
-    if USE_ABS_GYRO_SMOOTH:
-        gyro_control_smooth_deg_s = abs_Gyz_smooth_deg_s
-    else:
-        gyro_control_smooth_deg_s = np.abs(Gyz_smooth_deg_s)
-
-    result = pd.DataFrame({
-        'time_s': data['time_s'].to_numpy(),
-        'Gyz_deg_s': Gyz_deg_s,
-        'abs_Gyz_deg_s': abs_Gyz_deg_s,
-        'Gyz_smooth_deg_s': Gyz_smooth_deg_s,
-        'abs_Gyz_smooth_deg_s': abs_Gyz_smooth_deg_s,
-        'gyro_control_smooth_deg_s': gyro_control_smooth_deg_s
-    })
-
-    return result
-
-
 # 回転補正したZ軸角速度を時間積分して方位角を推定する。
 def compute_heading_gyro_integral_from_synced(
     sync_df,
@@ -609,112 +497,209 @@ def make_gyro_mean_heading(gyro_heading_R, gyro_heading_L):
     return aligned[['time_s', 'theta_deg']]
 
 
-# 角速度の大きさに応じてPCA窓幅を小さくしたり戻したりする時系列を作る。
-def make_window_schedule_from_gyro(
-    gyro_z_df,
-    high_threshold=GYRO_HIGH_THRESHOLD,
-    low_threshold=GYRO_LOW_THRESHOLD
-):
-    if gyro_z_df is None or len(gyro_z_df) == 0:
-        return pd.DataFrame(columns=[
-            'time_s',
-            'gyro_control_smooth_deg_s',
-            'window_size'
-        ])
+# =========================================================
+# Acceleration PCA
+# =========================================================
+# 回転補正済みの水平加速度をPCA入力用の時系列として作る。
+def prepare_acc_pca_data(sync_df, initial_quat):
+    required_cols = [
+        'time_s',
+        'Lacc_X', 'Lacc_Y', 'Lacc_Z',
+        'GameRo_X', 'GameRo_Y', 'GameRo_Z', 'GameRo_W'
+    ]
 
     data = (
-        gyro_z_df[['time_s', 'gyro_control_smooth_deg_s']]
+        sync_df
+        .dropna(subset=required_cols)
         .copy()
-        .sort_values('time_s')
         .reset_index(drop=True)
     )
 
-    current_window = PCA_WINDOW_MAX
-    state = 'normal'
-    recovery_count = 0
-    window_list = []
+    if len(data) == 0:
+        return pd.DataFrame(columns=[
+            'time_s',
+            'x_rotated',
+            'y_rotated'
+        ])
 
-    for omega_control_smooth in data['gyro_control_smooth_deg_s'].to_numpy():
-        if omega_control_smooth > high_threshold:
-            current_window = PCA_WINDOW_MIN
-            state = 'suppressed'
-            recovery_count = 0
+    ax = data['Lacc_X'].to_numpy()
+    ay = data['Lacc_Y'].to_numpy()
+    az = data['Lacc_Z'].to_numpy()
 
-        elif current_window < PCA_WINDOW_MAX:
-            if state == 'suppressed' and omega_control_smooth <= low_threshold:
-                state = 'recovering'
-                recovery_count = 0
+    gx = data['GameRo_X'].to_numpy()
+    gy = data['GameRo_Y'].to_numpy()
+    gz = data['GameRo_Z'].to_numpy()
+    gw = data['GameRo_W'].to_numpy()
 
-            if state == 'recovering':
-                current_window = min(
-                    PCA_WINDOW_MAX,
-                    PCA_WINDOW_MIN
-                    + (recovery_count // WINDOW_RECOVERY_INTERVAL)
-                    * WINDOW_RECOVERY_STEP
-                )
-                recovery_count += 1
+    Ax, Ay, _ = rotate_xyz_by_gamero(
+        ax, ay, az,
+        gx, gy, gz, gw,
+        initial_quat
+    )
 
-                if current_window >= PCA_WINDOW_MAX:
-                    current_window = PCA_WINDOW_MAX
-                    state = 'normal'
+    if APPLY_ACC_LOWPASS:
+        x_rotated = exponential_lowpass(Ax, ACC_LOWPASS_ALPHA)
+        y_rotated = exponential_lowpass(Ay, ACC_LOWPASS_ALPHA)
+    else:
+        x_rotated = Ax
+        y_rotated = Ay
 
-        window_list.append(current_window)
-
-    data['window_size'] = np.asarray(window_list, dtype=int)
-
-    return data
+    return pd.DataFrame({
+        'time_s': data['time_s'].to_numpy(),
+        'x_rotated': x_rotated,
+        'y_rotated': y_rotated
+    })
 
 
-# 左右の角速度移動平均の大きい方を使って，共通のPCA窓幅時系列を作る。
-def make_common_window_schedule_from_gyro(gyro_z_L, gyro_z_R):
-    if gyro_z_L is None or len(gyro_z_L) == 0:
-        return make_window_schedule_from_gyro(gyro_z_R)
+def empty_pc1_window_schedule_df():
+    return pd.DataFrame(columns=[
+        'time_s',
+        'window_size',
+        'pc1_ratio_L',
+        'pc1_ratio_R'
+    ])
 
-    if gyro_z_R is None or len(gyro_z_R) == 0:
-        return make_window_schedule_from_gyro(gyro_z_L)
+
+def compute_pc1_ratio_for_window(x_rotated, y_rotated, frame, window_size, pca):
+    if frame + 1 < window_size:
+        return np.nan
+
+    start_index = frame - (window_size - 1)
+    end_index = frame + 1
+
+    data_window = np.column_stack((
+        x_rotated[start_index:end_index],
+        y_rotated[start_index:end_index]
+    ))
+
+    pca.fit(data_window)
+    return float(pca.explained_variance_ratio_[0])
+
+
+def update_window_size_from_pc1(current_window, recovery_count, pc1_ratio_L, pc1_ratio_R):
+    finite_L = np.isfinite(pc1_ratio_L)
+    finite_R = np.isfinite(pc1_ratio_R)
+
+    low_detected = (
+        (finite_L and pc1_ratio_L < PCA_PC1_LOW_THRESHOLD)
+        or (finite_R and pc1_ratio_R < PCA_PC1_LOW_THRESHOLD)
+    )
+    high_both = (
+        finite_L
+        and finite_R
+        and pc1_ratio_L > PCA_PC1_HIGH_THRESHOLD
+        and pc1_ratio_R > PCA_PC1_HIGH_THRESHOLD
+    )
+
+    if low_detected:
+        return PCA_WINDOW_MIN, 0
+
+    if current_window < PCA_WINDOW_MAX and high_both:
+        next_window = min(
+            PCA_WINDOW_MAX,
+            PCA_WINDOW_MIN
+            + (recovery_count // WINDOW_RECOVERY_INTERVAL)
+            * WINDOW_RECOVERY_STEP
+        )
+        return next_window, recovery_count + 1
+
+    return current_window, recovery_count
+
+
+# 左右のPC1寄与率から，共通のPCA窓幅時系列を作る。
+def make_common_window_schedule_from_pc1(
+    sync_L,
+    initial_quat_L,
+    sync_R,
+    initial_quat_R
+):
+    left = prepare_acc_pca_data(sync_L, initial_quat_L)
+    right = prepare_acc_pca_data(sync_R, initial_quat_R)
+
+    if len(left) == 0 or len(right) == 0:
+        return empty_pc1_window_schedule_df()
 
     left = (
-        gyro_z_L[['time_s', 'gyro_control_smooth_deg_s']]
-        .copy()
-        .rename(columns={'gyro_control_smooth_deg_s': 'gyro_control_smooth_deg_s_L'})
+        left
+        .rename(columns={
+            'x_rotated': 'x_rotated_L',
+            'y_rotated': 'y_rotated_L'
+        })
         .sort_values('time_s')
         .reset_index(drop=True)
     )
     right = (
-        gyro_z_R[['time_s', 'gyro_control_smooth_deg_s']]
-        .copy()
-        .rename(columns={'gyro_control_smooth_deg_s': 'gyro_control_smooth_deg_s_R'})
+        right
+        .rename(columns={
+            'x_rotated': 'x_rotated_R',
+            'y_rotated': 'y_rotated_R'
+        })
         .sort_values('time_s')
         .reset_index(drop=True)
     )
 
-    common_gyro = pd.merge(
+    common_data = pd.merge(
         left,
         right,
         on='time_s',
         how='inner'
     )
 
-    if len(common_gyro) == 0:
-        return pd.DataFrame(columns=[
-            'time_s',
-            'gyro_control_smooth_deg_s',
-            'window_size'
-        ])
+    if len(common_data) == 0:
+        return empty_pc1_window_schedule_df()
 
-    common_gyro['gyro_control_smooth_deg_s'] = common_gyro[[
-        'gyro_control_smooth_deg_s_L',
-        'gyro_control_smooth_deg_s_R'
-    ]].max(axis=1)
+    time_data = common_data['time_s'].to_numpy()
+    x_L = common_data['x_rotated_L'].to_numpy()
+    y_L = common_data['y_rotated_L'].to_numpy()
+    x_R = common_data['x_rotated_R'].to_numpy()
+    y_R = common_data['y_rotated_R'].to_numpy()
 
-    return make_window_schedule_from_gyro(
-        common_gyro[['time_s', 'gyro_control_smooth_deg_s']]
-    )
+    pca_L = PCA(n_components=2)
+    pca_R = PCA(n_components=2)
+
+    current_window = PCA_WINDOW_MAX
+    recovery_count = 0
+
+    window_size_list = []
+    pc1_ratio_L_list = []
+    pc1_ratio_R_list = []
+
+    for frame in range(len(common_data)):
+        used_window = int(current_window)
+        pc1_ratio_L = compute_pc1_ratio_for_window(
+            x_L,
+            y_L,
+            frame,
+            used_window,
+            pca_L
+        )
+        pc1_ratio_R = compute_pc1_ratio_for_window(
+            x_R,
+            y_R,
+            frame,
+            used_window,
+            pca_R
+        )
+
+        window_size_list.append(used_window)
+        pc1_ratio_L_list.append(pc1_ratio_L)
+        pc1_ratio_R_list.append(pc1_ratio_R)
+
+        current_window, recovery_count = update_window_size_from_pc1(
+            current_window,
+            recovery_count,
+            pc1_ratio_L,
+            pc1_ratio_R
+        )
+
+    return pd.DataFrame({
+        'time_s': time_data,
+        'window_size': window_size_list,
+        'pc1_ratio_L': pc1_ratio_L_list,
+        'pc1_ratio_R': pc1_ratio_R_list
+    })
 
 
-# =========================================================
-# Acceleration PCA
-# =========================================================
 # 加速度PCA結果が空になる場合の列構造だけを持つDataFrameを作る。
 def empty_acc_pca_df(use_ratio_weight):
     if use_ratio_weight:
@@ -764,18 +749,7 @@ def compute_acc_pca_core(
     window_schedule_df=None,
     use_ratio_weight=False
 ):
-    required_cols = [
-        'time_s',
-        'Lacc_X', 'Lacc_Y', 'Lacc_Z',
-        'GameRo_X', 'GameRo_Y', 'GameRo_Z', 'GameRo_W'
-    ]
-
-    data = (
-        sync_df
-        .dropna(subset=required_cols)
-        .copy()
-        .reset_index(drop=True)
-    )
+    data = prepare_acc_pca_data(sync_df, initial_quat)
 
     if len(data) == 0:
         return empty_acc_pca_df(use_ratio_weight)
@@ -789,30 +763,10 @@ def compute_acc_pca_core(
     if len(data) < data['window_size'].min():
         return empty_acc_pca_df(use_ratio_weight)
 
-    ax = data['Lacc_X'].to_numpy()
-    ay = data['Lacc_Y'].to_numpy()
-    az = data['Lacc_Z'].to_numpy()
-
-    gx = data['GameRo_X'].to_numpy()
-    gy = data['GameRo_Y'].to_numpy()
-    gz = data['GameRo_Z'].to_numpy()
-    gw = data['GameRo_W'].to_numpy()
-
-    Ax, Ay, _ = rotate_xyz_by_gamero(
-        ax, ay, az,
-        gx, gy, gz, gw,
-        initial_quat
-    )
-
     time_data = data['time_s'].to_numpy()
     window_data = data['window_size'].to_numpy(dtype=int)
-
-    if APPLY_ACC_LOWPASS:
-        x_rotated = exponential_lowpass(Ax, ACC_LOWPASS_ALPHA)
-        y_rotated = exponential_lowpass(Ay, ACC_LOWPASS_ALPHA)
-    else:
-        x_rotated = Ax
-        y_rotated = Ay
+    x_rotated = data['x_rotated'].to_numpy()
+    y_rotated = data['y_rotated'].to_numpy()
 
     pca = PCA(n_components=2)
 
@@ -929,7 +883,7 @@ def compute_heading_acc_pca_proposed_from_synced(
     )
 
 
-# 角速度で決めた可変窓を使って加速度PCAの進行方向を推定する。
+# PC1寄与率で決めた可変窓を使って加速度PCAの進行方向を推定する。
 def compute_heading_acc_pca_variable_from_synced(
     sync_df,
     initial_quat,
@@ -939,7 +893,7 @@ def compute_heading_acc_pca_variable_from_synced(
     return compute_acc_pca_core(
         sync_df,
         initial_quat,
-        window_size=WINDOW_SIZE,
+        window_size=PCA_WINDOW_MAX,
         window_schedule_df=window_schedule_df,
         use_ratio_weight=use_ratio_weight
     )
@@ -1457,47 +1411,10 @@ def plot_gyro_heading_figure(gyro_heading_R, gyro_heading_L):
     plt.show()
 
 
-# 角速度とPCA窓幅を同じ時刻でまとめ，描画範囲に絞る。
-def get_gyro_control_label():
-    if USE_ABS_GYRO_SMOOTH:
-        return '|Gyz|移動平均'
-
-    return '生Gyz移動平均の絶対値'
-
-
-def prepare_window_plot_df(gyro_z_df, window_schedule_df):
-    if gyro_z_df is None or len(gyro_z_df) == 0:
-        return pd.DataFrame(columns=[
-            'time_s',
-            'gyro_control_smooth_deg_s',
-            'window_size'
-        ])
-
-    plot_df = pd.merge(
-        gyro_z_df[['time_s', 'gyro_control_smooth_deg_s']],
-        window_schedule_df[['time_s', 'window_size']],
-        on='time_s',
-        how='left'
-    )
-
-    if is_mask == 1:
-        mask = (
-            (plot_df['time_s'] >= limit_min_time)
-            & (plot_df['time_s'] <= limit_max_time)
-        )
-        plot_df = plot_df.loc[mask].reset_index(drop=True)
-
-    return plot_df
-
-
-# 角速度移動平均と可変PCA窓幅の変化を描画する。
-def plot_gyro_window_control(
-    gyro_z_L,
-    gyro_z_R,
-    window_schedule_common
-):
-    plot_L = prepare_window_plot_df(gyro_z_L, window_schedule_common)
-    plot_R = prepare_window_plot_df(gyro_z_R, window_schedule_common)
+# PC1寄与率の変化を描画範囲に絞る。
+def prepare_pc1_window_plot_df(window_schedule_common):
+    if window_schedule_common is None or len(window_schedule_common) == 0:
+        return empty_pc1_window_schedule_df()
 
     plot_window = window_schedule_common.copy()
     if is_mask == 1:
@@ -1507,70 +1424,57 @@ def plot_gyro_window_control(
         )
         plot_window = plot_window.loc[mask].reset_index(drop=True)
 
-    fig, axes = plt.subplots(
-        2,
+    return plot_window
+
+
+# PC1寄与率の変化を描画する。
+def plot_pc1_window_control(window_schedule_common):
+    plot_window = prepare_pc1_window_plot_df(window_schedule_common)
+
+    fig, ax_ratio = plt.subplots(
         1,
-        figsize=(12, 8),
-        sharex=True
+        1,
+        figsize=(12, 5)
     )
 
-    fig.suptitle('角速度移動平均と可変PCA窓幅', fontsize=16)
+    fig.suptitle('PC1寄与率', fontsize=16)
 
-    ax_gyro = axes[0]
-    gyro_control_label = get_gyro_control_label()
-    if len(plot_L) > 0:
-        ax_gyro.plot(
-            plot_L['time_s'],
-            plot_L['gyro_control_smooth_deg_s'],
-            label=f'左手 {gyro_control_label}',
+    if len(plot_window) > 0:
+        ax_ratio.plot(
+            plot_window['time_s'],
+            plot_window['pc1_ratio_L'],
+            label='左手 PC1寄与率',
             c='b',
             alpha=0.8
         )
-    if len(plot_R) > 0:
-        ax_gyro.plot(
-            plot_R['time_s'],
-            plot_R['gyro_control_smooth_deg_s'],
-            label=f'右手 {gyro_control_label}',
+        ax_ratio.plot(
+            plot_window['time_s'],
+            plot_window['pc1_ratio_R'],
+            label='右手 PC1寄与率',
             c='r',
             alpha=0.8
         )
 
-    ax_gyro.axhline(
-        GYRO_HIGH_THRESHOLD,
+    ax_ratio.axhline(
+        PCA_PC1_LOW_THRESHOLD,
         c='k',
         linestyle='--',
         alpha=0.7,
-        label=f'方向転換閾値 {GYRO_HIGH_THRESHOLD:g} deg/s'
+        label=f'窓幅縮小閾値 {PCA_PC1_LOW_THRESHOLD:g}'
     )
-    ax_gyro.axhline(
-        GYRO_LOW_THRESHOLD,
+    ax_ratio.axhline(
+        PCA_PC1_HIGH_THRESHOLD,
         c='k',
         linestyle=':',
         alpha=0.7,
-        label=f'直進閾値 {GYRO_LOW_THRESHOLD:g} deg/s'
+        label=f'窓幅回復閾値 {PCA_PC1_HIGH_THRESHOLD:g}'
     )
-    add_cod_time_lines_to_axis(ax_gyro)
-    ax_gyro.set_ylabel(f'{gyro_control_label} [deg/s]')
-    ax_gyro.grid(True)
-    ax_gyro.legend()
-
-    ax_window = axes[1]
-    if len(plot_window) > 0:
-        ax_window.plot(
-            plot_window['time_s'],
-            plot_window['window_size'],
-            label='共通 PCA窓幅',
-            c='g',
-            alpha=0.8,
-            drawstyle='steps-post'
-        )
-
-    add_cod_time_lines_to_axis(ax_window)
-    ax_window.set_xlabel('時間 [s]')
-    ax_window.set_ylabel('PCA窓幅 [samples]')
-    ax_window.set_ylim(PCA_WINDOW_MIN - 2, PCA_WINDOW_MAX + 2)
-    ax_window.grid(True)
-    ax_window.legend()
+    add_cod_time_lines_to_axis(ax_ratio)
+    ax_ratio.set_xlabel('時間 [s]')
+    ax_ratio.set_ylabel('PC1寄与率')
+    ax_ratio.set_ylim(-0.05, 1.05)
+    ax_ratio.grid(True)
+    ax_ratio.legend()
 
     plt.tight_layout()
     plt.show()
@@ -1590,9 +1494,6 @@ def main():
     initial_quat_L = sync_data['initial_quat_L']
     initial_quat_R = sync_data['initial_quat_R']
 
-    gyro_z_L = compute_rotated_gyro_z(sync_L, initial_quat_L)
-    gyro_z_R = compute_rotated_gyro_z(sync_R, initial_quat_R)
-
     gyro_heading_L = compute_heading_gyro_integral_from_synced(
         sync_L,
         initial_quat_L,
@@ -1608,9 +1509,11 @@ def main():
         gyro_heading_L
     )
 
-    window_schedule_common = make_common_window_schedule_from_gyro(
-        gyro_z_L,
-        gyro_z_R
+    window_schedule_common = make_common_window_schedule_from_pc1(
+        sync_L,
+        initial_quat_L,
+        sync_R,
+        initial_quat_R
     )
 
     print('\n=== 固定窓PCAを計算中 ===')
@@ -1636,7 +1539,7 @@ def main():
         window_size=WINDOW_SIZE
     )
 
-    print('\n=== 角速度可変窓PCAを計算中 ===')
+    print('\n=== PC1寄与率可変窓PCAを計算中 ===')
     heading_L_pca_variable = compute_heading_acc_pca_variable_from_synced(
         sync_L,
         initial_quat_L,
@@ -1767,14 +1670,10 @@ def main():
         heading_L_pca_variable,
         heading_R_prop_variable,
         heading_L_prop_variable,
-        figure_title='角速度可変窓PCA'
+        figure_title='PC1寄与率可変窓PCA'
     )
 
-    plot_gyro_window_control(
-        gyro_z_L,
-        gyro_z_R,
-        window_schedule_common
-    )
+    plot_pc1_window_control(window_schedule_common)
 
 
 if __name__ == '__main__':
