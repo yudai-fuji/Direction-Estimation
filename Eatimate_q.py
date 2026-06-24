@@ -13,22 +13,22 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'260518栁澤共同研究\KL1.csv'
-file_R = r'260518栁澤共同研究\KR1.csv'
-delay_time = 0.892716
+file_L = r'251209星田共同研究\HwL2.csv'
+file_R = r'251209星田共同研究\HwR2.csv'
+delay_time = 3.06
 cod_time = 21.99
-limit_min_time = 2
-limit_max_time = 45
+limit_min_time = 13.4
+limit_max_time = 27.75
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
 eval_min_time = 0
 eval_max_time = 0
 
-WINDOW_SIZE = 40
+WINDOW_SIZE = 60
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
-is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
+is_mask_g = 0     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
 
 
 # =========================================================
@@ -36,8 +36,8 @@ is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定な�
 # =========================================================
 DO_ACC_PCA = True              # 加速度PCA法
 DO_PROPOSED_ACC_PCA = True     # 寄与率重み付き加速度PCA法
-DO_GYRO_INTEGRAL = True        # 角速度累積法
-DO_GYRO_PCA = True             # 角速度PCA法
+DO_GYRO_INTEGRAL = False        # 角速度累積法
+DO_GYRO_PCA = False             # 角速度PCA法
 
 
 # =========================================================
@@ -356,7 +356,7 @@ def print_error_stats_from_weighted_vectors(heading_R, heading_L, method_name,
 # 左右平均はベクトル平均を用いる
 # 表示名は指定通り「左右平均」のまま
 # =========================================================
-def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str):
+def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str, plot_as_points=False):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
 
@@ -405,9 +405,14 @@ def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str):
     true_heading_all = wrap_pm180(true_heading_all)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-    plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-    plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    if plot_as_points:
+        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+        plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=16, alpha=0.8)
+    else:
+        plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
+        plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
+        plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
     plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
 
     plt.xlabel('時間 [s]')
@@ -424,7 +429,13 @@ def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str):
 # 添付コード通り，qx，qy の左右ベクトル平均を用いる
 # 表示名は指定通り「左右平均」のまま
 # =========================================================
-def plot_heading_timeseries_weighted_vectors(heading_R, heading_L, title_str, ylabel_str):
+def plot_heading_timeseries_weighted_vectors(
+    heading_R,
+    heading_L,
+    title_str,
+    ylabel_str,
+    plot_as_points=False
+):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
 
@@ -476,9 +487,14 @@ def plot_heading_timeseries_weighted_vectors(heading_R, heading_L, title_str, yl
     true_heading_all = wrap_pm180(true_heading_all)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-    plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-    plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    if plot_as_points:
+        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+        plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=16, alpha=0.8)
+    else:
+        plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
+        plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
+        plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
     plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
 
     plt.xlabel('時間 [s]')
@@ -922,48 +938,58 @@ def prepare_pca_ratio_df_for_plot(ratio_df, add_delay=False):
 # =========================================================
 # PCA寄与率プロット
 # =========================================================
-def plot_pca_contribution_separate(ratio_df, hand_label, add_delay=False):
-    ratio_plot = prepare_pca_ratio_df_for_plot(ratio_df, add_delay=add_delay)
+def plot_pca_contribution_side_by_side(ratio_L_df, ratio_R_df, window_size):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
 
-    if len(ratio_plot) == 0:
-        print(f"PCA寄与率（{hand_label}）: プロットできるデータがありません．")
-        return
+    plot_specs = [
+        (axes[0], ratio_L_df, '左手の端末', True, 'blue'),
+        (axes[1], ratio_R_df, '右手の端末', False, 'red')
+    ]
 
-    t = ratio_plot['time_s']
-    pc1 = ratio_plot['pc1_ratio']
-    pc2 = ratio_plot['pc2_ratio']
+    for ax, ratio_df, hand_label, add_delay, color_main in plot_specs:
+        ratio_plot = prepare_pca_ratio_df_for_plot(ratio_df, add_delay=add_delay)
 
-    if '左' in hand_label:
-        color_main = 'blue'
-    else:
-        color_main = 'red'
+        if len(ratio_plot) == 0:
+            print(f"PCA寄与率（{hand_label}）: プロットできるデータがありません．")
+            ax.text(
+                0.5,
+                0.5,
+                'プロットできるデータがありません．',
+                ha='center',
+                va='center',
+                transform=ax.transAxes
+            )
+        else:
+            t = ratio_plot['time_s']
+            pc1 = ratio_plot['pc1_ratio']
+            pc2 = ratio_plot['pc2_ratio']
 
-    plt.figure(figsize=(10, 6))
+            ax.plot(
+                t,
+                pc1,
+                label='第一主成分',
+                color=color_main,
+                linewidth=2,
+                alpha=0.9
+            )
 
-    plt.plot(
-        t,
-        pc1,
-        label='第一主成分',
-        color=color_main,
-        linewidth=2,
-        alpha=0.9
-    )
+            ax.plot(
+                t,
+                pc2,
+                label='第二主成分',
+                color=color_main,
+                linewidth=2,
+                alpha=0.4
+            )
 
-    plt.plot(
-        t,
-        pc2,
-        label='第二主成分',
-        color=color_main,
-        linewidth=2,
-        alpha=0.4
-    )
+            ax.legend()
 
-    plt.xlabel('時間 [s]')
-    plt.ylabel('寄与率')
-    plt.title(f'PCA寄与率（{hand_label}）')
-    plt.ylim(0.0, 1.0)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
+        ax.set_xlabel('時間 [s]')
+        ax.set_title(f'PCA寄与率（{hand_label}，サンプル数: {window_size}）')
+        ax.set_ylim(0.0, 1.0)
+        ax.grid(True, alpha=0.3)
+
+    axes[0].set_ylabel('寄与率')
     plt.tight_layout()
     plt.show()
 
@@ -1058,7 +1084,8 @@ if PLOT_ACC_PCA:
             heading_R_pca,
             heading_L_pca,
             title_str='時系列変化（加速度PCA法）',
-            ylabel_str='推定進行方向 [°]'
+            ylabel_str='推定進行方向 [°]',
+            plot_as_points=True
         )
     else:
         print("加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
@@ -1070,7 +1097,8 @@ if PLOT_PROPOSED_ACC_PCA:
             heading_R_prop,
             heading_L_prop,
             title_str='時系列変化（寄与率重み付き加速度PCA法）',
-            ylabel_str='推定進行方向 [°]'
+            ylabel_str='推定進行方向 [°]',
+            plot_as_points=True
         )
     else:
         print("寄与率重み付き加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
@@ -1094,7 +1122,8 @@ if PLOT_GYRO_PCA:
             heading_R_gyro_pca,
             heading_L_gyro_pca,
             title_str='時系列変化（角速度PCA法）',
-            ylabel_str='推定進行方向 [°]'
+            ylabel_str='推定進行方向 [°]',
+            plot_as_points=True
         )
     else:
         print("角速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
@@ -1169,16 +1198,10 @@ elif DO_ACC_PCA and heading_L_pca is not None and heading_R_pca is not None:
 
 if DO_PCA_RATIO_PLOT:
     if ratio_L_source is not None and ratio_R_source is not None:
-        plot_pca_contribution_separate(
+        plot_pca_contribution_side_by_side(
             ratio_L_source,
-            hand_label='左手の端末',
-            add_delay=True
-        )
-
-        plot_pca_contribution_separate(
             ratio_R_source,
-            hand_label='右手の端末',
-            add_delay=False
+            window_size=WINDOW_SIZE
         )
     else:
         print("\nPCA寄与率プロットは，加速度PCA系の手法がOFFのためスキップしました．")

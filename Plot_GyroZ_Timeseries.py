@@ -7,18 +7,18 @@ import numpy as np
 import math
 import japanize_matplotlib
 
-file_L = r'260518栁澤共同研究/KL2.csv'
-file_R = r'260518栁澤共同研究/KR2.csv'
-delay_time = 0.449970
-cod_times = [17.96, 22.5, 32.45]
-limit_min_time = 8
-limit_max_time = 39.31
+file_L = r'260518栁澤共同研究/YwL4.csv'
+file_R = r'260518栁澤共同研究/YwR4.csv'
+delay_time = 2.986508
+cod_times = [18.56, 23.31, 32.74]
+limit_min_time = 9.98
+limit_max_time = 36.85
 
 SAMPLE_INTERVAL = 0.02
 
 NEAREST_TOLERANCE = SAMPLE_INTERVAL
 
-GYRO_SMOOTH_WINDOW = 30
+GYRO_SMOOTH_WINDOW = 60
 
 is_mask = 1
 
@@ -443,13 +443,13 @@ def plot_gyro_z_timeseries(
             'Gyz_smooth_deg_s',
             'Gyz移動平均 [deg/s]',
             'Gyz移動平均',
-            {'linewidth': 2, 'alpha': 0.9}
+            {'linewidth': 2, 'alpha': 0.9, 'color': 'blue'}
         ),
         (
             'abs_Gyz_smooth_deg_s',
             '|Gyz|移動平均 [deg/s]',
             '|Gyz|移動平均',
-            {'linewidth': 2, 'alpha': 0.9}
+            {'linewidth': 2, 'alpha': 0.9, 'color': 'red'}
         )
     ]
 

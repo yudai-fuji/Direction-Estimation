@@ -15,12 +15,12 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260518栁澤共同研究/YwL4.csv'
-file_R = r'260518栁澤共同研究/YwR4.csv'
-delay_time = 2.986508
-cod_times = [18.56, 23.31, 32.74]
-limit_min_time = 9.98
-limit_max_time = 36.85
+file_L = r'260518栁澤共同研究/KL3.csv'
+file_R = r'260518栁澤共同研究/KR3.csv'
+delay_time = 2.492944
+cod_times = [17.48, 21.95, 31.03]
+limit_min_time = 8.78
+limit_max_time = 34.7
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
