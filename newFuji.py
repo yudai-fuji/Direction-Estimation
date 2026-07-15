@@ -15,12 +15,13 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260518栁澤共同研究/KL3.csv'
-file_R = r'260518栁澤共同研究/KR3.csv'
-delay_time = 2.492944
-cod_times = [17.48, 21.95, 31.03]
-limit_min_time = 8.78
-limit_max_time = 34.7
+file_L = r'260518栁澤共同研究/YwL4.csv'
+file_R = r'260518栁澤共同研究/YwR4.csv'
+delay_time = 2.986508
+cod_times = [18.56, 23.31, 32.74]
+limit_min_time = 9.98
+limit_max_time = 36.85
+turn_intervals = [(18.0, 19.54), (22.5, 24.25), (32.37, 34.05)]
 
 true_headings = [90.0, -180.0, -90.0, 0.0]
 
@@ -28,17 +29,17 @@ true_headings = [90.0, -180.0, -90.0, 0.0]
 WINDOW_SIZE = 40
 
 # 可変窓のPCA適用本数の最大値と最小値
-PCA_WINDOW_MAX = 50
-PCA_WINDOW_MIN = 25
+PCA_WINDOW_MAX = 60
+PCA_WINDOW_MIN = 30
 
 # 第一主成分の寄与率がこの値を下回ったら窓幅を最小にする。
-PCA_PC1_LOW_THRESHOLD = 0.810
+PCA_PC1_LOW_THRESHOLD = 0.8
 
 # 左右両方の第一主成分寄与率がこの値を上回ったら窓幅回復の条件を満たす。
-PCA_PC1_HIGH_THRESHOLD = 0.828
+PCA_PC1_HIGH_THRESHOLD = 0.85
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
-WINDOW_RECOVERY_STEP = 3
+WINDOW_RECOVERY_STEP = 5
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる条件を満たすとみなす。
 WINDOW_RECOVERY_INTERVAL = 10
@@ -62,7 +63,7 @@ SHOW_INDIVIDUAL_HEADINGS = False
 PLOT_HEADING_AS_POINTS = True
 
 # 回転後の水平加速度にローパスフィルタをかけてからPCAに渡すか
-APPLY_ACC_LOWPASS = True
+APPLY_ACC_LOWPASS = False
 ACC_LOWPASS_ALPHA = 0.2
 
 
@@ -129,6 +130,80 @@ def validate_true_heading_settings():
 
     if np.any(np.diff(cod_times_array) <= 0):
         raise ValueError('cod_times は小さい時刻から大きい時刻の順に設定してください．')
+
+
+def validate_turn_intervals():
+    if len(turn_intervals) != 3:
+        raise ValueError(
+            'turn_intervals は3つの方向転換区間を設定してください．'
+            ' 例: [(18.0, 19.0), (22.8, 23.8), (32.2, 33.2)]'
+        )
+
+    validated = []
+
+    for i, interval in enumerate(turn_intervals, start=1):
+        try:
+            start_time, end_time = interval
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'turn_intervals の {i} 番目は (開始時刻, 終了時刻) の形式にしてください．'
+            ) from exc
+
+        try:
+            start_time = float(start_time)
+            end_time = float(end_time)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'turn_intervals の {i} 番目は数値で設定してください．'
+            ) from exc
+
+        if not np.isfinite(start_time) or not np.isfinite(end_time):
+            raise ValueError(
+                f'turn_intervals の {i} 番目に有限でない値が含まれています．'
+            )
+
+        if start_time >= end_time:
+            raise ValueError(
+                f'turn_intervals の {i} 番目は開始時刻 < 終了時刻にしてください．'
+            )
+
+        validated.append((start_time, end_time))
+
+    validated = sorted(validated, key=lambda interval: interval[0])
+
+    for prev_interval, current_interval in zip(validated[:-1], validated[1:]):
+        if current_interval[0] < prev_interval[1]:
+            raise ValueError('turn_intervals は互いに重複しないように設定してください．')
+
+    return validated
+
+
+def make_straight_intervals_from_turn_intervals(validated_turn_intervals):
+    eval_start = float(limit_min_time)
+    eval_end = float(limit_max_time)
+
+    if eval_start >= eval_end:
+        return []
+
+    straight_intervals = []
+    current_start = eval_start
+
+    for turn_start, turn_end in validated_turn_intervals:
+        clipped_start = max(turn_start, eval_start)
+        clipped_end = min(turn_end, eval_end)
+
+        if clipped_end <= eval_start or clipped_start >= eval_end:
+            continue
+
+        if current_start < clipped_start:
+            straight_intervals.append((current_start, clipped_start))
+
+        current_start = max(current_start, clipped_end)
+
+    if current_start < eval_end:
+        straight_intervals.append((current_start, eval_end))
+
+    return straight_intervals
 
 
 # 時刻配列に対応する区間ごとの真値方位を作成する。
@@ -594,7 +669,10 @@ def update_window_size_from_pc1(current_window, recovery_count, pc1_ratio_L, pc1
     if low_detected:
         return PCA_WINDOW_MIN, 0
 
-    if current_window < PCA_WINDOW_MAX and high_both:
+    if current_window >= PCA_WINDOW_MAX:
+        return current_window, 0
+
+    if high_both:
         next_window = min(
             PCA_WINDOW_MAX,
             PCA_WINDOW_MIN
@@ -603,7 +681,7 @@ def update_window_size_from_pc1(current_window, recovery_count, pc1_ratio_L, pc1
         )
         return next_window, recovery_count + 1
 
-    return current_window, recovery_count
+    return current_window, 0
 
 
 # 左右のPC1寄与率から，共通のPCA窓幅時系列を作る。
@@ -971,8 +1049,74 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
 # =========================================================
 # RMSE and improvement
 # =========================================================
+def make_time_interval_mask(time_s, intervals=None):
+    time_s = np.asarray(time_s, dtype=float)
+
+    if intervals is None:
+        intervals = [(limit_min_time, limit_max_time)]
+
+    mask = np.zeros(len(time_s), dtype=bool)
+
+    for start_time, end_time in intervals:
+        mask |= (time_s >= start_time) & (time_s <= end_time)
+
+    return mask
+
+
+def calc_rms_from_values(theta_R, theta_L, theta_mean, time_s, intervals=None):
+    mask = make_time_interval_mask(time_s, intervals=intervals)
+
+    if np.sum(mask) == 0:
+        return np.nan, np.nan, np.nan
+
+    t_eval = time_s[mask]
+    theta_R_eval = theta_R[mask]
+    theta_L_eval = theta_L[mask]
+    theta_mean_eval = theta_mean[mask]
+
+    true_heading_eval = make_true_heading(t_eval)
+
+    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
+    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
+    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
+
+    RMS_R_deg = np.sqrt(np.mean(err_R**2))
+    RMS_L_deg = np.sqrt(np.mean(err_L**2))
+    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
+
+    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
+
+
+def average_rmse_values(rmse_values):
+    if len(rmse_values) == 0:
+        return np.nan, np.nan, np.nan
+
+    rmse_array = np.asarray(rmse_values, dtype=float)
+    averaged = []
+
+    for col in range(3):
+        col_values = rmse_array[:, col]
+        finite_values = col_values[np.isfinite(col_values)]
+
+        if len(finite_values) == 0:
+            averaged.append(np.nan)
+        else:
+            averaged.append(float(np.mean(finite_values)))
+
+    return tuple(averaged)
+
+
+def calc_average_rmse_for_intervals(calc_func, heading_R, heading_L, intervals):
+    rmse_values = [
+        calc_func(heading_R, heading_L, intervals=[interval])
+        for interval in intervals
+    ]
+
+    return average_rmse_values(rmse_values)
+
+
 # 左右それぞれとベクトル平均の推定方位RMSEを真値に対して計算する。
-def calc_rms_from_headings(heading_R, heading_L):
+def calc_rms_from_headings(heading_R, heading_L, intervals=None):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
 
@@ -997,30 +1141,19 @@ def calc_rms_from_headings(heading_R, heading_L):
     )
 
     t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
+    theta_R_all = aligned['theta_deg_R'].to_numpy()
+    theta_L_all = aligned['theta_deg_L'].to_numpy()
 
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
+    return calc_rms_from_values(
+        theta_R_all,
+        theta_L_all,
+        theta_mean,
+        t_all,
+        intervals=intervals
+    )
 
 
-def calc_rms_from_headings_simple_mean(heading_R, heading_L):
+def calc_rms_from_headings_simple_mean(heading_R, heading_L, intervals=None):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
 
@@ -1045,31 +1178,20 @@ def calc_rms_from_headings_simple_mean(heading_R, heading_L):
     ) / 2.0
 
     t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
+    theta_R_all = aligned['theta_deg_R'].to_numpy()
+    theta_L_all = aligned['theta_deg_L'].to_numpy()
 
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
+    return calc_rms_from_values(
+        theta_R_all,
+        theta_L_all,
+        theta_mean,
+        t_all,
+        intervals=intervals
+    )
 
 
 # 寄与率重み付きベクトル平均を使って左右平均方位のRMSEを計算する。
-def calc_rms_from_weighted_vectors(heading_R, heading_L):
+def calc_rms_from_weighted_vectors(heading_R, heading_L, intervals=None):
     heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
     heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
 
@@ -1093,27 +1215,16 @@ def calc_rms_from_weighted_vectors(heading_R, heading_L):
     theta_mean = np.degrees(np.arctan2(qy_mean, qx_mean))
 
     t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
+    theta_R_all = aligned['theta_deg_R'].to_numpy()
+    theta_L_all = aligned['theta_deg_L'].to_numpy()
 
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
+    return calc_rms_from_values(
+        theta_R_all,
+        theta_L_all,
+        theta_mean,
+        t_all,
+        intervals=intervals
+    )
 
 
 # 各手法のRMSE比較表を表示する。
@@ -1135,6 +1246,53 @@ def print_rmse_table(rmse_rows):
 
     print('\n=== RMSE比較 ===')
     print(rmse_df.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
+
+
+def make_segment_rmse_rows(method_specs, validated_turn_intervals, straight_intervals):
+    segment_rows = []
+
+    for label, calc_func, heading_R, heading_L, traditional_rmse in method_specs:
+        turn_rmse = calc_average_rmse_for_intervals(
+            calc_func,
+            heading_R,
+            heading_L,
+            validated_turn_intervals
+        )
+        straight_rmse = calc_average_rmse_for_intervals(
+            calc_func,
+            heading_R,
+            heading_L,
+            straight_intervals
+        )
+
+        segment_rows.extend([
+            [label, '従来', *traditional_rmse],
+            [label, '方向転換区間平均', *turn_rmse],
+            [label, '直進区間平均', *straight_rmse]
+        ])
+
+    return segment_rows
+
+
+def print_segment_rmse_table(segment_rows):
+    if len(segment_rows) == 0:
+        print('\n=== 区間別RMSE比較 ===')
+        print('表示する区間別RMSEがありません．')
+        return
+
+    segment_df = pd.DataFrame(
+        segment_rows,
+        columns=[
+            '手法',
+            '評価区分',
+            '右手RMSE [deg]',
+            '左手RMSE [deg]',
+            '左右平均RMSE [deg]'
+        ]
+    )
+
+    print('\n=== 区間別RMSE比較 ===')
+    print(segment_df.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
 
 
 # 基準値から新しい値への改善率をパーセントで計算する。
@@ -1282,7 +1440,8 @@ def plot_heading_on_axis(
     heading_L,
     title_str,
     use_weighted_mean,
-    use_simple_mean=False
+    use_simple_mean=False,
+    show_legend=True
 ):
     plot_data = align_heading_for_plot(
         heading_R,
@@ -1331,7 +1490,7 @@ def plot_heading_on_axis(
         plot_data['theta_mean'],
         label=mean_label,
         color='g',
-        marker_size=12
+        marker_size=8
     )
     ax.plot(
         t_plot,
@@ -1347,7 +1506,9 @@ def plot_heading_on_axis(
     ax.set_ylabel('推定進行方向 [deg]')
     ax.set_title(title_str)
     ax.grid(True)
-    ax.legend()
+
+    if show_legend:
+        ax.legend()
 
 
 # 通常PCAと寄与率重み付きPCAの方位時系列を横並びで描画する。
@@ -1382,7 +1543,8 @@ def plot_pca_comparison_figure(
         prop_heading_R,
         prop_heading_L,
         '寄与率重み付き加速度PCA',
-        use_weighted_mean=True
+        use_weighted_mean=True,
+        show_legend=False
     )
 
     plt.tight_layout()
@@ -1486,6 +1648,10 @@ def plot_pc1_window_control(window_schedule_common):
 # データ同期から各手法の推定，評価，描画までの全体処理を実行する。
 def main():
     validate_true_heading_settings()
+    validated_turn_intervals = validate_turn_intervals()
+    straight_intervals = make_straight_intervals_from_turn_intervals(
+        validated_turn_intervals
+    )
 
     sync_data = prepare_synchronized_sensor_data()
 
@@ -1629,24 +1795,71 @@ def main():
         heading_L_prop_variable
     )
 
+    rmse_method_specs = [
+        [
+            '角速度累積法',
+            calc_rms_from_headings_simple_mean,
+            gyro_heading_R,
+            gyro_heading_L,
+            gyro_integral_rmse
+        ],
+        [
+            '固定窓 加速度PCA',
+            calc_rms_from_headings,
+            heading_R_pca_fixed,
+            heading_L_pca_fixed,
+            fixed_acc_rmse
+        ],
+        [
+            '固定窓 寄与率重み付き加速度PCA',
+            calc_rms_from_weighted_vectors,
+            heading_R_prop_fixed,
+            heading_L_prop_fixed,
+            fixed_prop_rmse
+        ],
+        [
+            '可変窓 加速度PCA',
+            calc_rms_from_headings,
+            heading_R_pca_variable,
+            heading_L_pca_variable,
+            variable_acc_rmse
+        ],
+        [
+            '可変窓 寄与率重み付き加速度PCA',
+            calc_rms_from_weighted_vectors,
+            heading_R_prop_variable,
+            heading_L_prop_variable,
+            variable_prop_rmse
+        ]
+    ]
+
     rmse_rows = [
-        ['角速度累積法', *gyro_integral_rmse],
-        ['固定窓 加速度PCA', *fixed_acc_rmse],
-        ['固定窓 寄与率重み付き加速度PCA', *fixed_prop_rmse],
-        ['可変窓 加速度PCA', *variable_acc_rmse],
-        ['可変窓 寄与率重み付き加速度PCA', *variable_prop_rmse]
+        [label, *traditional_rmse]
+        for label, _, _, _, traditional_rmse in rmse_method_specs
     ]
     print_rmse_table(rmse_rows)
 
+    segment_rmse_rows = make_segment_rmse_rows(
+        rmse_method_specs,
+        validated_turn_intervals,
+        straight_intervals
+    )
+    print_segment_rmse_table(segment_rmse_rows)
+
     improvement_rows = [
+        make_improvement_row(
+            '固定窓 寄与率重み付き加速度PCA vs 固定窓 加速度PCA',
+            fixed_acc_rmse,
+            fixed_prop_rmse
+        ),
         make_improvement_row(
             '可変窓 加速度PCA vs 固定窓 加速度PCA',
             fixed_acc_rmse,
             variable_acc_rmse
         ),
         make_improvement_row(
-            '可変窓 寄与率重み付きPCA vs 固定窓 寄与率重み付きPCA',
-            fixed_prop_rmse,
+            '可変窓 寄与率重み付き加速度PCA vs 固定窓 加速度PCA',
+            fixed_acc_rmse,
             variable_prop_rmse
         )
     ]

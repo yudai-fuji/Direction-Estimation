@@ -21,18 +21,12 @@ delay_time = 2.055392
 video_to_sensor_offset = 10.704
 limit_min_time = 3.51 + video_to_sensor_offset
 limit_max_time = 50.60 + video_to_sensor_offset
-
 #真値
 true_headings = [90.0, -180.0, 90.0, 0.0, -90.0, -180.0, -90.0, 0.0]
-
-#スマホの時刻差整合
-video_to_sensor_offset = 10.704
-
 turn_start_times_video = [12.63, 17.07, 22.21, 26.79, 31.86, 36.44, 46.00]
-turn_end_times_video   = [13.73, 18.27, 23.32, 27.86, 33.05, 37.57, 47.26]
-
+turn_end_times_video = [13.73, 18.27, 23.32, 27.86, 33.05, 37.57, 47.26]
 turn_start_times = [round(t + video_to_sensor_offset, 3) for t in turn_start_times_video]
-turn_end_times   = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
+turn_end_times = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
 
 # 方向転換中の線形補間だけで使う内部角度。
 # 表示・誤差計算の直前までは，あえて [-180, 180) に丸めない。
@@ -50,20 +44,20 @@ turn_internal_headings = [
 WINDOW_SIZE = 40
 
 # 可変窓のPCA適用本数の最大値と最小値
-PCA_WINDOW_MAX = 60
-PCA_WINDOW_MIN = 30
+PCA_WINDOW_MAX = 50
+PCA_WINDOW_MIN = 38
 
 # 第一主成分の寄与率がこの値を下回ったら窓幅を最小にする。
-PCA_PC1_LOW_THRESHOLD = 0.8
+PCA_PC1_LOW_THRESHOLD = 0.78
 
 # 左右両方の第一主成分寄与率がこの値を上回ったら窓幅回復の条件を満たす。
-PCA_PC1_HIGH_THRESHOLD = 0.85
+PCA_PC1_HIGH_THRESHOLD = 0.83
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
-WINDOW_RECOVERY_STEP = 5
+WINDOW_RECOVERY_STEP = 3
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる条件を満たすとみなす。
-WINDOW_RECOVERY_INTERVAL = 10
+WINDOW_RECOVERY_INTERVAL = 15
 
 # センサ値を共通グリッドへ最近傍で割り当てる際の許容時間差の最大値
 SAMPLE_INTERVAL = 0.02

@@ -25,7 +25,7 @@ limit_max_time = 27.75
 eval_min_time = 0
 eval_max_time = 0
 
-WINDOW_SIZE = 60
+WINDOW_SIZE = 40
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
 is_mask_g = 0     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
@@ -356,7 +356,15 @@ def print_error_stats_from_weighted_vectors(heading_R, heading_L, method_name,
 # 左右平均はベクトル平均を用いる
 # 表示名は指定通り「左右平均」のまま
 # =========================================================
-def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str, plot_as_points=False):
+def plot_heading_timeseries(
+    heading_R,
+    heading_L,
+    title_str,
+    ylabel_str,
+    plot_as_points=False,
+    ax=None,
+    show=True
+):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
 
@@ -404,24 +412,30 @@ def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str, plot_as
     theta_mean_plot = wrap_pm180(theta_mean_plot)
     true_heading_all = wrap_pm180(true_heading_all)
 
-    plt.figure(figsize=(10, 6))
-    if plot_as_points:
-        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
-        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
-        plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=16, alpha=0.8)
-    else:
-        plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-        plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-        plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
-    plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 6))
 
-    plt.xlabel('時間 [s]')
-    plt.ylabel(ylabel_str)
-    plt.title(title_str)
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    if plot_as_points:
+        #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+        #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
+    else:
+        ax.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
+        ax.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
+        ax.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    ax.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
+
+    ax.set_xlabel('時間 [s]')
+    ax.set_ylabel(ylabel_str)
+    ax.set_title(title_str)
+    ax.grid(True)
+    ax.legend()
+
+    if show:
+        ax.figure.tight_layout()
+        plt.show()
+
+    return ax
 
 
 # =========================================================
@@ -434,7 +448,9 @@ def plot_heading_timeseries_weighted_vectors(
     heading_L,
     title_str,
     ylabel_str,
-    plot_as_points=False
+    plot_as_points=False,
+    ax=None,
+    show=True
 ):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
@@ -486,23 +502,64 @@ def plot_heading_timeseries_weighted_vectors(
     theta_mean_plot = wrap_pm180(theta_mean_plot)
     true_heading_all = wrap_pm180(true_heading_all)
 
-    plt.figure(figsize=(10, 6))
-    if plot_as_points:
-        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
-        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
-        plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=16, alpha=0.8)
-    else:
-        plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-        plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-        plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
-    plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 6))
 
-    plt.xlabel('時間 [s]')
-    plt.ylabel(ylabel_str)
-    plt.title(title_str)
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
+    if plot_as_points:
+        #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+        #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
+    else:
+        ax.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
+        ax.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
+        ax.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    ax.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
+
+    ax.set_xlabel('時間 [s]')
+    ax.set_ylabel(ylabel_str)
+    ax.set_title(title_str)
+    ax.grid(True)
+    ax.legend()
+
+    if show:
+        ax.figure.tight_layout()
+        plt.show()
+
+    return ax
+
+
+# =========================================================
+# 加速度PCA系2手法の時系列プロット
+# =========================================================
+def plot_acc_pca_methods_side_by_side(
+    heading_R_pca,
+    heading_L_pca,
+    heading_R_prop,
+    heading_L_prop
+):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+
+    plot_heading_timeseries(
+        heading_R_pca,
+        heading_L_pca,
+        title_str='時系列変化（加速度PCA法）',
+        ylabel_str='推定進行方向 [°]',
+        plot_as_points=True,
+        ax=axes[0],
+        show=False
+    )
+
+    plot_heading_timeseries_weighted_vectors(
+        heading_R_prop,
+        heading_L_prop,
+        title_str='時系列変化（寄与率重み付き加速度PCA法）',
+        ylabel_str='推定進行方向 [°]',
+        plot_as_points=True,
+        ax=axes[1],
+        show=False
+    )
+
+    fig.tight_layout()
     plt.show()
 
 
@@ -1078,31 +1135,52 @@ if DO_RMSE:
 # =========================================================
 # 3) 時系列プロット
 # =========================================================
-if PLOT_ACC_PCA:
-    if DO_ACC_PCA and heading_R_pca is not None and heading_L_pca is not None:
-        plot_heading_timeseries(
-            heading_R_pca,
-            heading_L_pca,
-            title_str='時系列変化（加速度PCA法）',
-            ylabel_str='推定進行方向 [°]',
-            plot_as_points=True
-        )
-    else:
-        print("加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
+acc_pca_plot_ready = (
+    PLOT_ACC_PCA
+    and DO_ACC_PCA
+    and heading_R_pca is not None
+    and heading_L_pca is not None
+)
 
+proposed_acc_pca_plot_ready = (
+    PLOT_PROPOSED_ACC_PCA
+    and DO_PROPOSED_ACC_PCA
+    and heading_R_prop is not None
+    and heading_L_prop is not None
+)
 
-if PLOT_PROPOSED_ACC_PCA:
-    if DO_PROPOSED_ACC_PCA and heading_R_prop is not None and heading_L_prop is not None:
-        plot_heading_timeseries_weighted_vectors(
-            heading_R_prop,
-            heading_L_prop,
-            title_str='時系列変化（寄与率重み付き加速度PCA法）',
-            ylabel_str='推定進行方向 [°]',
-            plot_as_points=True
-        )
-    else:
-        print("寄与率重み付き加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
+if acc_pca_plot_ready and proposed_acc_pca_plot_ready:
+    plot_acc_pca_methods_side_by_side(
+        heading_R_pca,
+        heading_L_pca,
+        heading_R_prop,
+        heading_L_prop
+    )
 
+else:
+    if PLOT_ACC_PCA:
+        if acc_pca_plot_ready:
+            plot_heading_timeseries(
+                heading_R_pca,
+                heading_L_pca,
+                title_str='時系列変化（加速度PCA法）',
+                ylabel_str='推定進行方向 [°]',
+                plot_as_points=True
+            )
+        else:
+            print("加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
+
+    if PLOT_PROPOSED_ACC_PCA:
+        if proposed_acc_pca_plot_ready:
+            plot_heading_timeseries_weighted_vectors(
+                heading_R_prop,
+                heading_L_prop,
+                title_str='時系列変化（寄与率重み付き加速度PCA法）',
+                ylabel_str='推定進行方向 [°]',
+                plot_as_points=True
+            )
+        else:
+            print("寄与率重み付き加速度PCA法の時系列プロットは，手法がOFFのためスキップしました．")
 
 if PLOT_GYRO_INTEGRAL:
     if DO_GYRO_INTEGRAL and heading_R_gyro is not None and heading_L_gyro is not None:

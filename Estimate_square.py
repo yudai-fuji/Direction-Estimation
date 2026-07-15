@@ -39,7 +39,7 @@ true_headings = [90.0, -180.0, -90.0, .0]
 eval_min_time = 0
 eval_max_time = 0
 
-WINDOW_SIZE = 30
+WINDOW_SIZE = 40
 
 is_mask = 1       # 時系列プロット表示 1: 範囲内のみ表示，1以外: 全体表示
 is_mask_g = 1     # 角度表示 1: [-180，180) に変換，1以外: 指定なし
@@ -665,9 +665,9 @@ def plot_heading_timeseries(heading_R, heading_L, title_str, ylabel_str):
     true_heading_all = wrap_pm180(true_heading_all)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-    plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-    plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+    #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+    plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
     plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
     add_cod_time_lines_to_plot()
 
@@ -733,9 +733,9 @@ def plot_heading_timeseries_weighted_vectors(heading_R, heading_L, title_str, yl
     true_heading_all = wrap_pm180(true_heading_all)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
-    plt.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
-    plt.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+    #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
+    #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
+    plt.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
     plt.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
     add_cod_time_lines_to_plot()
 
