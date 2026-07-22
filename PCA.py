@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from sklearn.decomposition import PCA
 import japanize_matplotlib
+from pathlib import Path
 
 print("ライブラリのインポートが完了しました。")
 
@@ -13,7 +14,9 @@ print("ライブラリのインポートが完了しました。")
 WINDOW_SIZE = 40
 ARROW_LENGTH = 1
 FILE_PATH = r'260630香川共同研究/KL2.csv'
-OUTPUT_GIF_PATH = FILE_PATH.replace('.csv','') + '-PCA.gif'
+OUTPUT_GIF_DIR = Path(__file__).resolve().parent / 'GIF画像'
+OUTPUT_GIF_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_GIF_PATH = OUTPUT_GIF_DIR / f'{Path(FILE_PATH).stem}-PCA.gif'
 
 # --- 2. データの読み込み ---
 try:
