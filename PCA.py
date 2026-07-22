@@ -12,7 +12,7 @@ print("ライブラリのインポートが完了しました。")
 # --- 1. 定数と設定 ---
 WINDOW_SIZE = 40
 ARROW_LENGTH = 1
-FILE_PATH = 'L1.csv'
+FILE_PATH = r'260630香川共同研究/KL2.csv'
 OUTPUT_GIF_PATH = FILE_PATH.replace('.csv','') + '-PCA.gif'
 
 # --- 2. データの読み込み ---
@@ -98,44 +98,67 @@ x_data = df['X_rotated'].values
 y_data = df['Y_rotated'].values
 z_data = df['Z_rotated'].values
 
-print(len(y_data))
-
 #グラフの初期設定と軸範囲の固定
-fig, ax = plt.subplots(figsize=(8, 8))
-x_min, x_max = x_data.min(), x_data.max()
-y_min, y_max = y_data.min(), y_data.max()
-x_range = x_max - x_min
-y_range = y_max - y_min
-max_range = max(x_range, y_range)
-padding = max_range * 0.1
-plot_range = max_range + padding
-x_center = (x_min + x_max) / 2
-y_center = (y_min + y_max) / 2
+absolute_acceleration = np.concatenate((np.abs(x_data), np.abs(y_data)))
+detail_limit = max(np.percentile(absolute_acceleration, 99.5) * 1.1, 1.0)
+overview_limit = np.max(absolute_acceleration) * 1.1
+if overview_limit == 0:
+    overview_limit = 1.0
 
-#真値
-#true_vec = ax.quiver(0,0,0,1,color = 'black',angles='xy', scale_units='xy', scale = 1, alpha=0.7)
-#true_vec.set_UVC(0,15)
+fig, (detail_ax, overview_ax) = plt.subplots(1, 2, figsize=(16, 8))
 
-ax.set_xlim(x_center - plot_range / 2, x_center + plot_range / 2)
-ax.set_ylim(y_center - plot_range / 2, y_center + plot_range / 2)
+for plot_ax, plot_limit, title in (
+        (detail_ax, detail_limit, '通常範囲（99.5パーセンタイル）'),
+        (overview_ax, overview_limit, '全体範囲（外れ値を含む）')):
+    plot_ax.set_xlim(-plot_limit, plot_limit)
+    plot_ax.set_ylim(-plot_limit, plot_limit)
+    plot_ax.set_aspect('equal', adjustable='box')
+    plot_ax.set_xlabel('X方向加速度')
+    plot_ax.set_ylabel('Y方向加速度')
+    plot_ax.set_title(title)
+    plot_ax.grid(True)
 
-"""パワポで表示表示するため不要
-ax.set_xlabel('Wx')
-ax.set_ylabel('Wy')
-ax.set_title('PCAの第一主成分')
-"""
-ax.grid(True)
-
-#アニメーション要素の初期
-growing_points, = ax.plot([], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
+#アニメーション要素の初期化
+detail_points, = detail_ax.plot(
+    [], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
+overview_points, = overview_ax.plot(
+    [], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
 
 #ベクトル(X,Y,U,V):X,Y(始点):U,V(成分)
-pca_quiver = ax.quiver(0, 0, 0, 0, color='red', scale=1, scale_units='xy', angles='xy')
+detail_pca_quiver = detail_ax.quiver(
+    0, 0, 0, 0, color='red', scale=1, scale_units='xy', angles='xy')
+overview_pca_quiver = overview_ax.quiver(
+    0, 0, 0, 0, color='red', scale=1, scale_units='xy', angles='xy')
+
+fig.tight_layout()
 
 #主成分を1つだけ求める(何次元に落とし込むか)
 pca = PCA(n_components=1)
 
 print("グラフの初期設定が完了しました。")
+
+x_min, x_max = x_data.min(), x_data.max()
+y_min, y_max = y_data.min(), y_data.max()
+
+x_min_index = np.argmin(x_data)
+x_max_index = np.argmax(x_data)
+y_min_index = np.argmin(y_data)
+y_max_index = np.argmax(y_data)
+
+x_min_timestamp_ns = time_data[x_min_index]
+x_max_timestamp_ns = time_data[x_max_index]
+y_min_timestamp_ns = time_data[y_min_index]
+y_max_timestamp_ns = time_data[y_max_index]
+
+x_min_time_sec = (x_min_timestamp_ns - time_data[0]) / 1_000_000_000
+x_max_time_sec = (x_max_timestamp_ns - time_data[0]) / 1_000_000_000
+y_min_time_sec = (y_min_timestamp_ns - time_data[0]) / 1_000_000_000
+y_max_time_sec = (y_max_timestamp_ns - time_data[0]) / 1_000_000_000
+
+print(f"xの最小値は {x_min:.6f} で，時刻は {x_min_time_sec:.6f} 秒です。")
+print(f"xの最大値は {x_max:.6f} で，時刻は {x_max_time_sec:.6f} 秒です。")
+print(f"yの最小値は {y_min:.6f} で，時刻は {y_min_time_sec:.6f} 秒です。")
+print(f"yの最大値は {y_max:.6f} で，時刻は {y_max_time_sec:.6f} 秒です。")
 
 #更新用関数
 def update(frame):
@@ -143,17 +166,22 @@ def update(frame):
     start_index = max(0 , (frame - (WINDOW_SIZE - 1)))
     end_index = frame + 1
 
-    growing_points.set_data(x_data[start_index:end_index],y_data[start_index:end_index])
+    x_window = x_data[start_index:end_index]
+    y_window = y_data[start_index:end_index]
+
+    detail_points.set_data(x_window, y_window)
+    overview_points.set_data(x_window, y_window)
     
     if end_index - start_index < WINDOW_SIZE:
         #必要引数:U(x成分),V(y成分)
-        pca_quiver.set_UVC(0, 0)
+        detail_pca_quiver.set_UVC(0, 0)
+        overview_pca_quiver.set_UVC(0, 0)
 
-        return growing_points, pca_quiver
+        return (detail_points, overview_points,
+                detail_pca_quiver, overview_pca_quiver)
 
     #データ数行，2列の2次元配列
-    data_window = np.column_stack((x_data[start_index:end_index],
-                                   y_data[start_index:end_index]))
+    data_window = np.column_stack((x_window, y_window))
 
     #引数は2次元配列
     pca.fit(data_window)
@@ -168,9 +196,12 @@ def update(frame):
     scaled_vector = norm_vector * ARROW_LENGTH
 
     #pca_vectorに再度方向ベクトルを代入
-    pca_quiver.set_UVC(scaled_vector[0], scaled_vector[1])
+    detail_pca_quiver.set_UVC(scaled_vector[0], scaled_vector[1])
+    overview_pca_quiver.set_UVC(scaled_vector[0], scaled_vector[1])
 
-    return growing_points, pca_quiver
+    return (detail_points, overview_points,
+            detail_pca_quiver, overview_pca_quiver)
+
 
 #アニメーションの生成
 #必要引数:fig, func(各フレームごとに呼ばれる更新関数), frames(フレーム数)
