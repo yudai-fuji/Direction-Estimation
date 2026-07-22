@@ -1,4 +1,4 @@
-#---PCAを用いて第一主成分の動きを矢印ベクトルで追うGif画像の出力---
+#---PCAを用いて第一主成分軸の動きを直線で追うGif画像の出力---
 
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ print("ライブラリのインポートが完了しました。")
 
 # --- 1. 定数と設定 ---
 WINDOW_SIZE = 40
-ARROW_LENGTH = 1
+PCA_AXIS_HALF_LENGTH_RATIO = 1 / 3
 FILE_PATH = r'260630香川共同研究/KL2.csv'
 OUTPUT_GIF_DIR = Path(__file__).resolve().parent / 'GIF画像'
 OUTPUT_GIF_DIR.mkdir(parents=True, exist_ok=True)
@@ -127,11 +127,9 @@ detail_points, = detail_ax.plot(
 overview_points, = overview_ax.plot(
     [], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
 
-#ベクトル(X,Y,U,V):X,Y(始点):U,V(成分)
-detail_pca_quiver = detail_ax.quiver(
-    0, 0, 0, 0, color='red', scale=1, scale_units='xy', angles='xy')
-overview_pca_quiver = overview_ax.quiver(
-    0, 0, 0, 0, color='red', scale=1, scale_units='xy', angles='xy')
+#第一主成分軸を表す、矢印のない赤い実線
+detail_pca_line, = detail_ax.plot([], [], color='red', linestyle='-')
+overview_pca_line, = overview_ax.plot([], [], color='red', linestyle='-')
 
 fig.tight_layout()
 
@@ -163,6 +161,12 @@ print(f"xの最大値は {x_max:.6f} で，時刻は {x_max_time_sec:.6f} 秒で
 print(f"yの最小値は {y_min:.6f} で，時刻は {y_min_time_sec:.6f} 秒です。")
 print(f"yの最大値は {y_max:.6f} で，時刻は {y_max_time_sec:.6f} 秒です。")
 
+
+def pca_axis_endpoints(unit_vector, limit):
+    half_axis_vector = unit_vector * (limit * PCA_AXIS_HALF_LENGTH_RATIO)
+    return -half_axis_vector, half_axis_vector
+
+
 #更新用関数
 def update(frame):
     
@@ -176,12 +180,11 @@ def update(frame):
     overview_points.set_data(x_window, y_window)
     
     if end_index - start_index < WINDOW_SIZE:
-        #必要引数:U(x成分),V(y成分)
-        detail_pca_quiver.set_UVC(0, 0)
-        overview_pca_quiver.set_UVC(0, 0)
+        detail_pca_line.set_data([], [])
+        overview_pca_line.set_data([], [])
 
         return (detail_points, overview_points,
-                detail_pca_quiver, overview_pca_quiver)
+                detail_pca_line, overview_pca_line)
 
     #データ数行，2列の2次元配列
     data_window = np.column_stack((x_window, y_window))
@@ -195,20 +198,25 @@ def update(frame):
     #pca_vectorを正規化
     norm_vector = pca_vector / np.linalg.norm(pca_vector)
 
-    #大きさを設定した値に変更
-    scaled_vector = norm_vector * ARROW_LENGTH
+    detail_start, detail_end = pca_axis_endpoints(norm_vector, detail_limit)
+    overview_start, overview_end = pca_axis_endpoints(
+        norm_vector, overview_limit)
 
-    #pca_vectorに再度方向ベクトルを代入
-    detail_pca_quiver.set_UVC(scaled_vector[0], scaled_vector[1])
-    overview_pca_quiver.set_UVC(scaled_vector[0], scaled_vector[1])
+    detail_pca_line.set_data(
+        [detail_start[0], detail_end[0]],
+        [detail_start[1], detail_end[1]])
+    overview_pca_line.set_data(
+        [overview_start[0], overview_end[0]],
+        [overview_start[1], overview_end[1]])
 
     return (detail_points, overview_points,
-            detail_pca_quiver, overview_pca_quiver)
+            detail_pca_line, overview_pca_line)
 
 
 #アニメーションの生成
 #必要引数:fig, func(各フレームごとに呼ばれる更新関数), frames(フレーム数)
-animation = FuncAnimation(fig, update, frames=len(x_data), blit=False)
+animation = FuncAnimation(fig, update, frames=500, blit=False)
+
 
 #GIFとして保存
 try:
