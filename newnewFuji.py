@@ -23,10 +23,8 @@ limit_min_time = 3.51 + video_to_sensor_offset
 limit_max_time = 50.60 + video_to_sensor_offset
 #真値
 true_headings = [90.0, -180.0, 90.0, 0.0, -90.0, -180.0, -90.0, 0.0]
-turn_start_times_video = [12.63, 17.07, 22.21, 26.79, 31.86, 36.44, 46.00]
-turn_end_times_video = [13.73, 18.27, 23.32, 27.86, 33.05, 37.57, 47.26]
-turn_start_times = [round(t + video_to_sensor_offset, 3) for t in turn_start_times_video]
-turn_end_times = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
+turn_start_times = [23.6, 27.9, 33.1, 37.7, 42.8, 47.5, 56.9]
+turn_end_times = [24.8, 29.2, 34.3, 39.1, 44.2, 49.1, 58.2]
 
 # 方向転換中の線形補間だけで使う内部角度。
 # 表示・誤差計算の直前までは，あえて [-180, 180) に丸めない。
@@ -41,23 +39,23 @@ turn_internal_headings = [
 ]
 
 #固定窓のPCA適用本数
-WINDOW_SIZE = 40
+WINDOW_SIZE = 45
 
 # 可変窓のPCA適用本数の最大値と最小値
-PCA_WINDOW_MAX = 50
-PCA_WINDOW_MIN = 38
+PCA_WINDOW_MAX = 60
+PCA_WINDOW_MIN = 30
 
 # 第一主成分の寄与率がこの値を下回ったら窓幅を最小にする。
-PCA_PC1_LOW_THRESHOLD = 0.78
+PCA_PC1_LOW_THRESHOLD = 0.75
 
 # 左右両方の第一主成分寄与率がこの値を上回ったら窓幅回復の条件を満たす。
-PCA_PC1_HIGH_THRESHOLD = 0.83
+PCA_PC1_HIGH_THRESHOLD = 0.75
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
-WINDOW_RECOVERY_STEP = 3
+WINDOW_RECOVERY_STEP = 1
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる条件を満たすとみなす。
-WINDOW_RECOVERY_INTERVAL = 15
+WINDOW_RECOVERY_INTERVAL = 5
 
 # センサ値を共通グリッドへ最近傍で割り当てる際の許容時間差の最大値
 SAMPLE_INTERVAL = 0.02
@@ -238,25 +236,16 @@ def make_true_heading(time_s):
 
     return result
 
+def add_turn_regions_to_axis(ax, turn_starts, turn_ends):
+    if len(turn_starts) != len(turn_ends):
+        raise ValueError('方向転換開始時刻と終了時刻の個数が一致していません')
 
-def add_turn_time_lines_to_axis(ax):
-    for i, (start, end) in enumerate(zip(turn_start_times, turn_end_times)):
-        start_label = '方向転換開始' if i == 0 else None
-        end_label = '方向転換終了' if i == 0 else None
-        ax.axvline(
-            start,
-            c='gray',
-            linestyle=':',
-            alpha=0.7,
-            label=start_label
-        )
-        ax.axvline(
-            end,
-            c='gray',
-            linestyle='--',
-            alpha=0.55,
-            label=end_label
-        )
+    for i, (start, end) in enumerate(zip(turn_starts, turn_ends)):
+        region_label = '方向転換区間' if i == 0 else None
+
+        ax.axvspan(start, end, facecolor = 'green', alpha = 0.12, edgecolor = 'none',
+                   linewidth = 0, zorder = 0, label = region_label)
+
 
 
 def kyoyaku(gx, gy, gz, gw):
@@ -1610,7 +1599,7 @@ def plot_heading_on_axis(
             plot_data['theta_L'],
             label='左手の端末',
             color='b',
-            marker_size=8
+            marker_size=4
         )
         plot_heading_estimate(
             ax,
@@ -1618,7 +1607,7 @@ def plot_heading_on_axis(
             plot_data['theta_R'],
             label='右手の端末',
             color='r',
-            marker_size=8
+            marker_size=4
         )
 
     mean_label = '左右平均'
@@ -1629,7 +1618,7 @@ def plot_heading_on_axis(
         plot_data['theta_mean'],
         label=mean_label,
         color='g',
-        marker_size=12
+        marker_size=6
     )
     ax.plot(
         t_plot,
@@ -1639,8 +1628,7 @@ def plot_heading_on_axis(
         linestyle='--',
         alpha=0.8
     )
-    add_turn_time_lines_to_axis(ax)
-
+   
     ax.set_xlabel('時間 [s]')
     ax.set_ylabel('推定進行方向 [deg]')
     ax.set_title(title_str)
@@ -1729,50 +1717,54 @@ def prepare_pc1_window_plot_df(window_schedule_common):
 def plot_pc1_window_control(window_schedule_common):
     plot_window = prepare_pc1_window_plot_df(window_schedule_common)
 
-    fig, ax_ratio = plt.subplots(
+    fig, axes = plt.subplots(
         1,
-        1,
-        figsize=(12, 5)
+        2,
+        figsize=(16, 5),
+        sharex=True,
+        sharey=True
     )
 
-    fig.suptitle('PC1寄与率', fontsize=16)
+    fig.suptitle('PC1寄与率の時系列変化', fontsize=16)
 
-    if len(plot_window) > 0:
-        ax_ratio.plot(
-            plot_window['time_s'],
-            plot_window['pc1_ratio_L'],
-            label='左手 PC1寄与率',
-            c='b',
-            alpha=0.8
+    plot_specs = [
+        (axes[0], 'pc1_ratio_L', '左手', 'b'),
+        (axes[1], 'pc1_ratio_R', '右手', 'r')
+    ]
+
+    for ax_ratio, ratio_column, hand_label, line_color in plot_specs:
+        add_turn_regions_to_axis(ax_ratio, turn_start_times, turn_end_times)
+
+        if len(plot_window) > 0:
+            ax_ratio.plot(
+                plot_window['time_s'],
+                plot_window[ratio_column],
+                label=f'{hand_label} PC1寄与率',
+                c=line_color,
+                alpha=0.8
+            )
+
+        ax_ratio.axhline(
+            PCA_PC1_LOW_THRESHOLD,
+            c='k',
+            linestyle='--',
+            alpha=0.7,
+            label=f'窓幅縮小閾値 {PCA_PC1_LOW_THRESHOLD:g}'
         )
-        ax_ratio.plot(
-            plot_window['time_s'],
-            plot_window['pc1_ratio_R'],
-            label='右手 PC1寄与率',
-            c='r',
-            alpha=0.8
+        ax_ratio.axhline(
+            PCA_PC1_HIGH_THRESHOLD,
+            c='k',
+            linestyle=':',
+            alpha=0.7,
+            label=f'窓幅回復閾値 {PCA_PC1_HIGH_THRESHOLD:g}'
         )
-
-    ax_ratio.axhline(
-        PCA_PC1_LOW_THRESHOLD,
-        c='k',
-        linestyle='--',
-        alpha=0.7,
-        label=f'窓幅縮小閾値 {PCA_PC1_LOW_THRESHOLD:g}'
-    )
-    ax_ratio.axhline(
-        PCA_PC1_HIGH_THRESHOLD,
-        c='k',
-        linestyle=':',
-        alpha=0.7,
-        label=f'窓幅回復閾値 {PCA_PC1_HIGH_THRESHOLD:g}'
-    )
-    add_turn_time_lines_to_axis(ax_ratio)
-    ax_ratio.set_xlabel('時間 [s]')
-    ax_ratio.set_ylabel('PC1寄与率')
-    ax_ratio.set_ylim(-0.05, 1.05)
-    ax_ratio.grid(True)
-    ax_ratio.legend()
+  
+        ax_ratio.set_xlabel('時間 [s]')
+        ax_ratio.set_ylabel('PC1寄与率')
+        ax_ratio.set_title(hand_label)
+        ax_ratio.set_ylim(0.5, 1.0)
+        ax_ratio.grid(True)
+        ax_ratio.legend()
 
     plt.tight_layout()
     plt.show()
