@@ -58,6 +58,9 @@ WINDOW_RECOVERY_STEP = 1
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる条件を満たすとみなす。
 WINDOW_RECOVERY_INTERVAL = 5
 
+# Falseでは左右共通のAND条件，Trueでは左右独立の条件で窓幅を決定する。
+USE_INDEPENDENT_PREVIOUS_PC1_WINDOW = True
+
 # センサ値を共通グリッドへ最近傍で割り当てる際の許容時間差の最大値
 SAMPLE_INTERVAL = 0.02
 
@@ -794,6 +797,373 @@ def make_common_window_schedule_from_pc1(
     })
 
 
+# 前時刻比較型可変窓の空スケジュールを作る。
+def empty_previous_pc1_window_schedule_df():
+    return pd.DataFrame(columns=[
+        'time_s',
+        'window_size',
+        'pc1_ratio_L',
+        'pc1_ratio_R',
+        'removed_count',
+        'forced_min_window'
+    ])
+
+
+# 前時刻に採用した左右PC1寄与率との比較から，共通のPCA窓幅時系列を作る。
+def make_common_window_schedule_by_previous_pc1(
+    sync_L,
+    initial_quat_L,
+    sync_R,
+    initial_quat_R
+):
+    left = prepare_acc_pca_data(sync_L, initial_quat_L)
+    right = prepare_acc_pca_data(sync_R, initial_quat_R)
+
+    if len(left) == 0 or len(right) == 0:
+        return empty_previous_pc1_window_schedule_df()
+
+    left = (
+        left
+        .rename(columns={
+            'x_rotated': 'x_rotated_L',
+            'y_rotated': 'y_rotated_L'
+        })
+        .sort_values('time_s')
+        .reset_index(drop=True)
+    )
+    right = (
+        right
+        .rename(columns={
+            'x_rotated': 'x_rotated_R',
+            'y_rotated': 'y_rotated_R'
+        })
+        .sort_values('time_s')
+        .reset_index(drop=True)
+    )
+
+    common_data = pd.merge(
+        left,
+        right,
+        on='time_s',
+        how='inner'
+    )
+
+    if len(common_data) == 0:
+        return empty_previous_pc1_window_schedule_df()
+
+    time_data = common_data['time_s'].to_numpy()
+    x_L = common_data['x_rotated_L'].to_numpy()
+    y_L = common_data['y_rotated_L'].to_numpy()
+    x_R = common_data['x_rotated_R'].to_numpy()
+    y_R = common_data['y_rotated_R'].to_numpy()
+
+    pca_L = PCA(n_components=2)
+    pca_R = PCA(n_components=2)
+
+    previous_window_size = None
+    previous_ratio_L = np.nan
+    previous_ratio_R = np.nan
+
+    window_size_list = []
+    pc1_ratio_L_list = []
+    pc1_ratio_R_list = []
+    removed_count_list = []
+    forced_min_window_list = []
+
+    for frame in range(len(common_data)):
+        if frame + 1 < PCA_WINDOW_MIN:
+            window_size_list.append(PCA_WINDOW_MIN)
+            pc1_ratio_L_list.append(np.nan)
+            pc1_ratio_R_list.append(np.nan)
+            removed_count_list.append(0)
+            forced_min_window_list.append(False)
+            continue
+
+        if previous_window_size is None:
+            initial_candidate_window_size = PCA_WINDOW_MIN
+        else:
+            initial_candidate_window_size = min(
+                previous_window_size + 1,
+                PCA_WINDOW_MAX,
+                frame + 1
+            )
+
+        candidate_window_size = int(initial_candidate_window_size)
+        candidate_ratio_L = compute_pc1_ratio_for_window(
+            x_L,
+            y_L,
+            frame,
+            candidate_window_size,
+            pca_L
+        )
+        candidate_ratio_R = compute_pc1_ratio_for_window(
+            x_R,
+            y_R,
+            frame,
+            candidate_window_size,
+            pca_R
+        )
+
+        forced_min_window = False
+
+        if previous_window_size is not None:
+            while not (
+                candidate_ratio_L >= previous_ratio_L
+                and candidate_ratio_R >= previous_ratio_R
+            ):
+                if candidate_window_size <= PCA_WINDOW_MIN:
+                    forced_min_window = True
+                    break
+
+                candidate_window_size -= 1
+                candidate_ratio_L = compute_pc1_ratio_for_window(
+                    x_L,
+                    y_L,
+                    frame,
+                    candidate_window_size,
+                    pca_L
+                )
+                candidate_ratio_R = compute_pc1_ratio_for_window(
+                    x_R,
+                    y_R,
+                    frame,
+                    candidate_window_size,
+                    pca_R
+                )
+
+        removed_count = (
+            initial_candidate_window_size - candidate_window_size
+        )
+
+        window_size_list.append(candidate_window_size)
+        pc1_ratio_L_list.append(candidate_ratio_L)
+        pc1_ratio_R_list.append(candidate_ratio_R)
+        removed_count_list.append(int(removed_count))
+        forced_min_window_list.append(forced_min_window)
+
+        previous_window_size = candidate_window_size
+        previous_ratio_L = candidate_ratio_L
+        previous_ratio_R = candidate_ratio_R
+
+    return pd.DataFrame({
+        'time_s': time_data,
+        'window_size': window_size_list,
+        'pc1_ratio_L': pc1_ratio_L_list,
+        'pc1_ratio_R': pc1_ratio_R_list,
+        'removed_count': removed_count_list,
+        'forced_min_window': forced_min_window_list
+    })
+
+
+# 前時刻比較型可変窓の採用状況を表示する。
+def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
+    print('\n=== 前時刻寄与率比較型可変窓の診断 ===')
+
+    if (
+        window_schedule_previous_pc1 is None
+        or len(window_schedule_previous_pc1) == 0
+    ):
+        print('診断できる窓幅スケジュールがありません。')
+        return
+
+    finite_mask = (
+        np.isfinite(window_schedule_previous_pc1['pc1_ratio_L'])
+        & np.isfinite(window_schedule_previous_pc1['pc1_ratio_R'])
+    )
+    valid_schedule = (
+        window_schedule_previous_pc1.loc[finite_mask]
+        .reset_index(drop=True)
+    )
+
+    valid_count = len(valid_schedule)
+    print(f'PCA寄与率を計算できた時刻数: {valid_count}')
+
+    if valid_count == 0:
+        print('窓幅統計を計算できるデータがありません。')
+        return
+
+    mean_window = valid_schedule['window_size'].mean()
+    min_window = int(valid_schedule['window_size'].min())
+    max_window = int(valid_schedule['window_size'].max())
+    mean_removed_count = valid_schedule['removed_count'].mean()
+    min_window_ratio = (
+        valid_schedule['window_size'] == PCA_WINDOW_MIN
+    ).mean()
+    forced_count = int(valid_schedule['forced_min_window'].sum())
+    forced_ratio = valid_schedule['forced_min_window'].mean()
+
+    print(f'平均窓幅: {mean_window:.4f}')
+    print(f'最小窓幅: {min_window}')
+    print(f'最大窓幅: {max_window}')
+    print(f'平均 removed_count: {mean_removed_count:.4f}')
+    print(
+        f'窓幅が{PCA_WINDOW_MIN}だった割合: '
+        f'{min_window_ratio:.2%}'
+    )
+    print(f'forced_min_window が True だった回数: {forced_count}')
+    print(
+        'forced_min_window が True だった割合: '
+        f'{forced_ratio:.2%}'
+    )
+
+
+# 左右独立方式で使う片側分の空スケジュールを作る。
+def empty_independent_previous_pc1_window_schedule_df():
+    return pd.DataFrame(columns=[
+        'time_s',
+        'window_size',
+        'pc1_ratio',
+        'removed_count',
+        'forced_min_window'
+    ])
+
+
+# 片側の前時刻PC1寄与率との比較から，独立したPCA窓幅時系列を作る。
+def make_independent_window_schedule_by_previous_pc1(
+    sync_df,
+    initial_quat
+):
+    data = prepare_acc_pca_data(sync_df, initial_quat)
+
+    if len(data) == 0:
+        return empty_independent_previous_pc1_window_schedule_df()
+
+    data = data.sort_values('time_s').reset_index(drop=True)
+
+    time_data = data['time_s'].to_numpy()
+    x_rotated = data['x_rotated'].to_numpy()
+    y_rotated = data['y_rotated'].to_numpy()
+
+    pca = PCA(n_components=2)
+
+    previous_window_size = None
+    previous_ratio = np.nan
+
+    window_size_list = []
+    pc1_ratio_list = []
+    removed_count_list = []
+    forced_min_window_list = []
+
+    for frame in range(len(data)):
+        if frame + 1 < PCA_WINDOW_MIN:
+            window_size_list.append(PCA_WINDOW_MIN)
+            pc1_ratio_list.append(np.nan)
+            removed_count_list.append(0)
+            forced_min_window_list.append(False)
+            continue
+
+        if previous_window_size is None:
+            initial_candidate_window_size = PCA_WINDOW_MIN
+        else:
+            initial_candidate_window_size = min(
+                previous_window_size + 1,
+                PCA_WINDOW_MAX,
+                frame + 1
+            )
+
+        candidate_window_size = int(initial_candidate_window_size)
+        candidate_ratio = compute_pc1_ratio_for_window(
+            x_rotated,
+            y_rotated,
+            frame,
+            candidate_window_size,
+            pca
+        )
+
+        forced_min_window = False
+
+        if previous_window_size is not None:
+            while not (
+                candidate_ratio >= previous_ratio
+            ):
+                if candidate_window_size <= PCA_WINDOW_MIN:
+                    forced_min_window = True
+                    break
+
+                candidate_window_size -= 1
+                candidate_ratio = compute_pc1_ratio_for_window(
+                    x_rotated,
+                    y_rotated,
+                    frame,
+                    candidate_window_size,
+                    pca
+                )
+
+        removed_count = (
+            initial_candidate_window_size - candidate_window_size
+        )
+
+        window_size_list.append(candidate_window_size)
+        pc1_ratio_list.append(candidate_ratio)
+        removed_count_list.append(int(removed_count))
+        forced_min_window_list.append(forced_min_window)
+
+        previous_window_size = candidate_window_size
+        previous_ratio = candidate_ratio
+
+    return pd.DataFrame({
+        'time_s': time_data,
+        'window_size': window_size_list,
+        'pc1_ratio': pc1_ratio_list,
+        'removed_count': removed_count_list,
+        'forced_min_window': forced_min_window_list
+    })
+
+
+# 左右独立方式の窓幅採用状況を片側ずつ表示する。
+def print_independent_previous_pc1_window_diagnostics(
+    window_schedule_previous_pc1_L,
+    window_schedule_previous_pc1_R
+):
+    print('\n=== 前時刻寄与率比較型可変窓・左右独立方式の診断 ===')
+
+    side_schedules = [
+        ('左手', window_schedule_previous_pc1_L),
+        ('右手', window_schedule_previous_pc1_R)
+    ]
+
+    for side_label, schedule in side_schedules:
+        print(f'\n--- {side_label} ---')
+
+        if schedule is None or len(schedule) == 0:
+            print('診断できる窓幅スケジュールがありません。')
+            continue
+
+        finite_mask = np.isfinite(schedule['pc1_ratio'])
+        valid_schedule = schedule.loc[finite_mask].reset_index(drop=True)
+
+        valid_count = len(valid_schedule)
+        print(f'PCA寄与率を計算できた時刻数: {valid_count}')
+
+        if valid_count == 0:
+            print('窓幅統計を計算できるデータがありません。')
+            continue
+
+        mean_window = valid_schedule['window_size'].mean()
+        min_window = int(valid_schedule['window_size'].min())
+        max_window = int(valid_schedule['window_size'].max())
+        mean_removed_count = valid_schedule['removed_count'].mean()
+        min_window_ratio = (
+            valid_schedule['window_size'] == PCA_WINDOW_MIN
+        ).mean()
+        forced_count = int(valid_schedule['forced_min_window'].sum())
+        forced_ratio = valid_schedule['forced_min_window'].mean()
+
+        print(f'平均窓幅: {mean_window:.4f}')
+        print(f'最小窓幅: {min_window}')
+        print(f'最大窓幅: {max_window}')
+        print(f'平均 removed_count: {mean_removed_count:.4f}')
+        print(
+            f'窓幅が{PCA_WINDOW_MIN}だった割合: '
+            f'{min_window_ratio:.2%}'
+        )
+        print(f'forced_min_window が True だった回数: {forced_count}')
+        print(
+            'forced_min_window が True だった割合: '
+            f'{forced_ratio:.2%}'
+        )
+
+
 # 加速度PCA結果が空になる場合の列構造だけを持つDataFrameを作る。
 def empty_acc_pca_df(use_ratio_weight):
     if use_ratio_weight:
@@ -1332,6 +1702,10 @@ def print_section_rmse_tables(section_rmse_rows):
         '固定窓・寄与率重み付きPCA',
         '可変窓PCA',
         '可変窓・寄与率重み付きPCA',
+        '前時刻比較型可変窓PCA',
+        '前時刻比較型可変窓・寄与率重み付きPCA',
+        '左右独立・前時刻比較型可変窓PCA',
+        '左右独立・前時刻比較型可変窓・寄与率重み付きPCA',
         '角速度累積法'
     ]
     side_specs = [
@@ -1377,13 +1751,17 @@ def print_section_rmse_tables(section_rmse_rows):
 # Plotting
 # =========================================================
 
-def plot_four_method_absolute_error_cdf(method_specs):
+def plot_pca_method_absolute_error_cdf(method_specs):
     # 手法ごとの色を固定する。
     color_map = {
         '固定窓PCA': 'tab:blue',
         '固定窓・寄与率重み付きPCA': 'tab:orange',
         '可変窓PCA': 'tab:green',
-        '可変窓・寄与率重み付きPCA': 'tab:red'
+        '可変窓・寄与率重み付きPCA': 'tab:red',
+        '前時刻比較型可変窓PCA': 'tab:purple',
+        '前時刻比較型可変窓・寄与率重み付きPCA': 'tab:brown',
+        '左右独立・前時刻比較型可変窓PCA': 'tab:pink',
+        '左右独立・前時刻比較型可変窓・寄与率重み付きPCA': 'tab:gray'
     }
 
     fig, ax = plt.subplots(
@@ -1449,7 +1827,7 @@ def plot_four_method_absolute_error_cdf(method_specs):
         fontsize=16
     )
     ax.set_title(
-        '4手法の左右平均方位絶対誤差の累積分布関数'
+        'PCA手法の左右平均方位絶対誤差の累積分布関数'
     )
 
     # 絶対角度誤差なので、横軸の最小値は0度。
@@ -1786,6 +2164,61 @@ def main():
         sync_R,
         initial_quat_R
     )
+    if USE_INDEPENDENT_PREVIOUS_PC1_WINDOW:
+        previous_pc1_method_name = (
+            '左右独立・前時刻比較型可変窓PCA'
+        )
+        previous_pc1_weighted_method_name = (
+            '左右独立・前時刻比較型可変窓・寄与率重み付きPCA'
+        )
+        previous_pc1_figure_title = (
+            '左右独立・前時刻寄与率比較型可変窓PCA'
+        )
+        previous_pc1_progress_message = (
+            '=== 左右独立・前時刻寄与率比較型可変窓PCAを計算中 ==='
+        )
+        window_schedule_previous_pc1_L = (
+            make_independent_window_schedule_by_previous_pc1(
+                sync_L,
+                initial_quat_L
+            )
+        )
+        window_schedule_previous_pc1_R = (
+            make_independent_window_schedule_by_previous_pc1(
+                sync_R,
+                initial_quat_R
+            )
+        )
+        print_independent_previous_pc1_window_diagnostics(
+            window_schedule_previous_pc1_L,
+            window_schedule_previous_pc1_R
+        )
+    else:
+        previous_pc1_method_name = (
+            '前時刻比較型可変窓PCA'
+        )
+        previous_pc1_weighted_method_name = (
+            '前時刻比較型可変窓・寄与率重み付きPCA'
+        )
+        previous_pc1_figure_title = (
+            '前時刻寄与率比較型可変窓PCA'
+        )
+        previous_pc1_progress_message = (
+            '=== 前時刻寄与率比較型可変窓PCAを計算中 ==='
+        )
+        window_schedule_previous_pc1 = (
+            make_common_window_schedule_by_previous_pc1(
+                sync_L,
+                initial_quat_L,
+                sync_R,
+                initial_quat_R
+            )
+        )
+        window_schedule_previous_pc1_L = window_schedule_previous_pc1
+        window_schedule_previous_pc1_R = window_schedule_previous_pc1
+        print_previous_pc1_window_diagnostics(
+            window_schedule_previous_pc1
+        )
 
     print('\n=== 固定窓PCAを計算中 ===')
     heading_L_pca_fixed = compute_heading_acc_pca_from_synced(
@@ -1837,6 +2270,33 @@ def main():
         use_ratio_weight=True
     )
 
+    print(f'\n{previous_pc1_progress_message}')
+    heading_L_pca_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
+        sync_L,
+        initial_quat_L,
+        window_schedule_previous_pc1_L,
+        use_ratio_weight=False
+    )
+    heading_R_pca_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
+        sync_R,
+        initial_quat_R,
+        window_schedule_previous_pc1_R,
+        use_ratio_weight=False
+    )
+
+    heading_L_prop_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
+        sync_L,
+        initial_quat_L,
+        window_schedule_previous_pc1_L,
+        use_ratio_weight=True
+    )
+    heading_R_prop_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
+        sync_R,
+        initial_quat_R,
+        window_schedule_previous_pc1_R,
+        use_ratio_weight=True
+    )
+
     print('\n=== 角速度累積法を用いたPCA 180度補正中 ===')
     heading_L_pca_fixed = resolve_pca_180_by_gyro(
         heading_L_pca_fixed,
@@ -1878,6 +2338,26 @@ def main():
         gyro_mean_heading,
         use_ratio_weight=True
     )
+    heading_L_pca_previous_pc1 = resolve_pca_180_by_gyro(
+        heading_L_pca_previous_pc1,
+        gyro_mean_heading,
+        use_ratio_weight=False
+    )
+    heading_R_pca_previous_pc1 = resolve_pca_180_by_gyro(
+        heading_R_pca_previous_pc1,
+        gyro_mean_heading,
+        use_ratio_weight=False
+    )
+    heading_L_prop_previous_pc1 = resolve_pca_180_by_gyro(
+        heading_L_prop_previous_pc1,
+        gyro_mean_heading,
+        use_ratio_weight=True
+    )
+    heading_R_prop_previous_pc1 = resolve_pca_180_by_gyro(
+        heading_R_prop_previous_pc1,
+        gyro_mean_heading,
+        use_ratio_weight=True
+    )
 
     section_method_specs = [
         (
@@ -1905,6 +2385,20 @@ def main():
             '可変窓・寄与率重み付きPCA',
             heading_R_prop_variable,
             heading_L_prop_variable,
+            True,
+            False
+        ),
+        (
+            previous_pc1_method_name,
+            heading_R_pca_previous_pc1,
+            heading_L_pca_previous_pc1,
+            False,
+            False
+        ),
+        (
+            previous_pc1_weighted_method_name,
+            heading_R_prop_previous_pc1,
+            heading_L_prop_previous_pc1,
             True,
             False
         ),
@@ -1941,7 +2435,7 @@ def main():
                         for spec in section_method_specs
                         if spec[0] != '角速度累積法']
 
-    plot_four_method_absolute_error_cdf(cdf_method_specs)
+    plot_pca_method_absolute_error_cdf(cdf_method_specs)
 
     plot_gyro_heading_figure(
         gyro_heading_R,
@@ -1962,6 +2456,14 @@ def main():
         heading_R_prop_variable,
         heading_L_prop_variable,
         figure_title='PC1寄与率可変窓PCA'
+    )
+
+    plot_pca_comparison_figure(
+        heading_R_pca_previous_pc1,
+        heading_L_pca_previous_pc1,
+        heading_R_prop_previous_pc1,
+        heading_L_prop_previous_pc1,
+        figure_title=previous_pc1_figure_title
     )
 
     plot_pc1_window_control(window_schedule_common)
