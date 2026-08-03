@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import math
 
 import matplotlib.pyplot as plt
@@ -23,8 +22,10 @@ limit_min_time = 3.51 + video_to_sensor_offset
 limit_max_time = 50.60 + video_to_sensor_offset
 #真値
 true_headings = [90.0, -180.0, 90.0, 0.0, -90.0, -180.0, -90.0, 0.0]
-turn_start_times = [23.6, 27.9, 33.1, 37.7, 42.8, 47.5, 56.9]
-turn_end_times = [24.8, 29.2, 34.3, 39.1, 44.2, 49.1, 58.2]
+turn_start_times_video = [12.63, 17.07, 22.21, 26.79, 31.86, 36.44, 46.00]
+turn_end_times_video = [13.73, 18.27, 23.32, 27.86, 33.05, 37.57, 47.26]
+turn_start_times = [round(t + video_to_sensor_offset, 3) for t in turn_start_times_video]
+turn_end_times = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
 
 # 方向転換中の線形補間だけで使う内部角度。
 # 表示・誤差計算の直前までは，あえて [-180, 180) に丸めない。
@@ -39,7 +40,7 @@ turn_internal_headings = [
 ]
 
 #固定窓のPCA適用本数
-WINDOW_SIZE = 45
+WINDOW_SIZE = 50
 
 # 可変窓のPCA適用本数の最大値と最小値
 PCA_WINDOW_MAX = 60
@@ -308,7 +309,7 @@ def rotate_xyz_by_gamero(x, y, z, gx, gy, gz, gw, initial_quat):
 def load_sensor_file_with_time(file_path, time_offset_s=0.0):
     df = pd.read_csv(file_path)
 
-    zero_df = df[df['Sensor'].isin(TIME_ZERO_SENSORS)].copy()
+    zero_df = df[df['Sensor'].isin(TIME_ZERO_SENSORS)]
     if len(zero_df) == 0:
         raise ValueError(f'{file_path} に {TIME_ZERO_SENSORS} のいずれも存在しません．')
 
@@ -339,7 +340,7 @@ def load_sensor_file_with_time(file_path, time_offset_s=0.0):
 
 # 指定センサの有効な時刻範囲を取得する。
 def get_sensor_time_range(df, sensor_name):
-    sensor_df = df[df['Sensor'] == sensor_name].copy()
+    sensor_df = df[df['Sensor'] == sensor_name]
 
     if len(sensor_df) == 0:
         raise ValueError(f'{sensor_name} がファイル内に存在しません．')
@@ -381,7 +382,6 @@ def make_common_grid(df_L, df_R, required_sensors):
 def nearest_sensor_to_grid(df, sensor_name, grid_df):
     sensor_df = (
         df[df['Sensor'] == sensor_name]
-        .copy()
         .sort_values('time_s')
         .reset_index(drop=True)
     )
@@ -396,7 +396,7 @@ def nearest_sensor_to_grid(df, sensor_name, grid_df):
 
     matched = pd.merge_asof(
         grid_df.sort_values('time_s'),
-        sensor_df.sort_values('time_s'),
+        sensor_df,
         on='time_s',
         direction='backward',
         tolerance=NEAREST_TOLERANCE
@@ -1065,151 +1065,6 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
 # =========================================================
 # RMSE and improvement
 # =========================================================
-# 左右それぞれとベクトル平均の推定方位RMSEを真値に対して計算する。
-def calc_rms_from_headings(heading_R, heading_L):
-    heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
-    heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
-
-    aligned = pd.merge(
-        heading_R,
-        heading_L,
-        on='time_s',
-        how='inner',
-        suffixes=('_R', '_L')
-    )
-
-    aligned = aligned.dropna(
-        subset=['theta_deg_R', 'theta_deg_L']
-    ).reset_index(drop=True)
-
-    if len(aligned) == 0:
-        return np.nan, np.nan, np.nan
-
-    theta_mean = mean_two_headings_by_vector(
-        aligned['theta_deg_R'].to_numpy(),
-        aligned['theta_deg_L'].to_numpy()
-    )
-
-    t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
-
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
-
-
-def calc_rms_from_headings_simple_mean(heading_R, heading_L):
-    heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
-    heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
-
-    aligned = pd.merge(
-        heading_R,
-        heading_L,
-        on='time_s',
-        how='inner',
-        suffixes=('_R', '_L')
-    )
-
-    aligned = aligned.dropna(
-        subset=['theta_deg_R', 'theta_deg_L']
-    ).reset_index(drop=True)
-
-    if len(aligned) == 0:
-        return np.nan, np.nan, np.nan
-
-    theta_mean = (
-        aligned['theta_deg_R'].to_numpy()
-        + aligned['theta_deg_L'].to_numpy()
-    ) / 2.0
-
-    t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
-
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
-
-
-# 寄与率重み付きベクトル平均を使って左右平均方位のRMSEを計算する。
-def calc_rms_from_weighted_vectors(heading_R, heading_L):
-    heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
-    heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
-
-    aligned = pd.merge(
-        heading_R,
-        heading_L,
-        on='time_s',
-        how='inner',
-        suffixes=('_R', '_L')
-    )
-
-    aligned = aligned.dropna(
-        subset=['theta_deg_R', 'theta_deg_L', 'qx_R', 'qy_R', 'qx_L', 'qy_L']
-    ).reset_index(drop=True)
-
-    if len(aligned) == 0:
-        return np.nan, np.nan, np.nan
-
-    qx_mean = (aligned['qx_R'].to_numpy() + aligned['qx_L'].to_numpy()) / 2.0
-    qy_mean = (aligned['qy_R'].to_numpy() + aligned['qy_L'].to_numpy()) / 2.0
-    theta_mean = np.degrees(np.arctan2(qy_mean, qx_mean))
-
-    t_all = aligned['time_s'].to_numpy()
-    mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
-
-    if np.sum(mask) == 0:
-        return np.nan, np.nan, np.nan
-
-    t_eval = t_all[mask]
-    theta_R_eval = aligned.loc[mask, 'theta_deg_R'].to_numpy()
-    theta_L_eval = aligned.loc[mask, 'theta_deg_L'].to_numpy()
-    theta_mean_eval = theta_mean[mask]
-
-    true_heading_eval = make_true_heading(t_eval)
-
-    err_R = angle_diff_pm180(theta_R_eval, true_heading_eval)
-    err_L = angle_diff_pm180(theta_L_eval, true_heading_eval)
-    err_mean = angle_diff_pm180(theta_mean_eval, true_heading_eval)
-
-    RMS_R_deg = np.sqrt(np.mean(err_R**2))
-    RMS_L_deg = np.sqrt(np.mean(err_L**2))
-    RMS_mean_deg = np.sqrt(np.mean(err_mean**2))
-
-    return RMS_R_deg, RMS_L_deg, RMS_mean_deg
-
-
 # 各手法のRMSE比較表を表示する。
 def finite_mean(values):
     values = np.asarray(values, dtype=float)
@@ -1236,8 +1091,8 @@ def align_headings_for_section_rmse(
     use_weighted_mean=False,
     use_simple_mean=False
 ):
-    heading_R = heading_R.copy().sort_values('time_s').reset_index(drop=True)
-    heading_L = heading_L.copy().sort_values('time_s').reset_index(drop=True)
+    heading_R = heading_R.sort_values('time_s').reset_index(drop=True)
+    heading_L = heading_L.sort_values('time_s').reset_index(drop=True)
 
     aligned = pd.merge(
         heading_R,
@@ -1277,6 +1132,58 @@ def align_headings_for_section_rmse(
     aligned['theta_mean_deg'] = theta_mean
 
     return aligned
+
+
+def empty_absolute_error_cdf_df():
+    return pd.DataFrame(columns=['absolute_error_deg', 'cdf'])
+
+
+def make_absolute_error_cdf_data(
+    heading_R,
+    heading_L,
+    use_weighted_mean=False,
+    use_simple_mean=False
+):
+    aligned = align_headings_for_section_rmse(
+        heading_R,
+        heading_L,
+        use_weighted_mean=use_weighted_mean,
+        use_simple_mean=use_simple_mean
+    )
+
+    if aligned.empty:
+        return empty_absolute_error_cdf_df()
+
+    mask = (
+        (aligned['time_s'] >= limit_min_time)
+        & (aligned['time_s'] <= limit_max_time)
+    )
+
+    evaluation_df = (
+        aligned.loc[mask, ['time_s', 'theta_mean_deg']]
+        .reset_index(drop=True)
+    )
+
+    if evaluation_df.empty:
+        return empty_absolute_error_cdf_df()
+
+    true_heading = make_true_heading(evaluation_df['time_s'].to_numpy())
+    error_deg = angle_diff_pm180(
+        evaluation_df['theta_mean_deg'].to_numpy(),
+        true_heading
+    )
+
+    absolute_error_deg = np.abs(error_deg)
+    absolute_error_sorted = np.sort(absolute_error_deg)
+    cumulative_probability = (
+        np.arange(1, len(absolute_error_sorted) + 1, dtype=float)
+        / len(absolute_error_sorted)
+    )
+
+    return pd.DataFrame({
+        'absolute_error_deg': absolute_error_sorted,
+        'cdf': cumulative_probability
+    })
 
 
 def calc_section_rmse_rows(
@@ -1469,6 +1376,107 @@ def print_section_rmse_tables(section_rmse_rows):
 # =========================================================
 # Plotting
 # =========================================================
+
+def plot_four_method_absolute_error_cdf(method_specs):
+    # 手法ごとの色を固定する。
+    color_map = {
+        '固定窓PCA': 'tab:blue',
+        '固定窓・寄与率重み付きPCA': 'tab:orange',
+        '可変窓PCA': 'tab:green',
+        '可変窓・寄与率重み付きPCA': 'tab:red'
+    }
+
+    fig, ax = plt.subplots(
+        1,
+        1,
+        figsize=(11, 7)
+    )
+
+    plotted_method_count = 0
+
+    for (
+        method_name,
+        heading_R,
+        heading_L,
+        use_weighted_mean,
+        use_simple_mean
+    ) in method_specs:
+        cdf_df = make_absolute_error_cdf_data(
+            heading_R,
+            heading_L,
+            use_weighted_mean=use_weighted_mean,
+            use_simple_mean=use_simple_mean
+        )
+
+        if len(cdf_df) == 0:
+            print(
+                f'{method_name}: '
+                'CDFを計算できるデータがありません。'
+            )
+            continue
+
+        ax.step(
+            cdf_df['absolute_error_deg'],
+            cdf_df['cdf'],
+            where='post',
+            label=(
+                f'{method_name} '
+                f'(n={len(cdf_df)})'
+            ),
+            color=color_map.get(method_name),
+            linewidth=2.0,
+            alpha=0.9
+        )
+
+        plotted_method_count += 1
+
+    if plotted_method_count == 0:
+        ax.text(
+            0.5,
+            0.5,
+            'プロットできるCDFデータがありません。',
+            ha='center',
+            va='center',
+            transform=ax.transAxes
+        )
+
+    ax.set_xlabel(
+        '左右平均方位の絶対誤差 [deg]',
+        fontsize=16
+    )
+    ax.set_ylabel(
+        '累積確率',
+        fontsize=16
+    )
+    ax.set_title(
+        '4手法の左右平均方位絶対誤差の累積分布関数'
+    )
+
+    # 絶対角度誤差なので、横軸の最小値は0度。
+    ax.set_xlim(left=0.0)
+
+    # CDFの値域は0～1。
+    ax.set_ylim(0.0, 1.0)
+
+    ax.set_yticks(np.arange(0.0, 1.01, 0.1))
+    ax.tick_params(axis='both', labelsize=13)
+
+
+
+    ax.grid(
+        True,
+        which='both',
+        linestyle='--',
+        alpha=0.5
+    )
+
+    if plotted_method_count > 0:
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
 # 左右の推定方位を時刻でそろえ，描画用の真値と平均方位を作る。
 def align_heading_for_plot(
     heading_R,
@@ -1476,47 +1484,20 @@ def align_heading_for_plot(
     use_weighted_mean,
     use_simple_mean=False
 ):
-    heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
-    heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
-
-    aligned = pd.merge(
+    aligned = align_headings_for_section_rmse(
         heading_R,
         heading_L,
-        on='time_s',
-        how='inner',
-        suffixes=('_R', '_L')
+        use_weighted_mean=use_weighted_mean,
+        use_simple_mean=use_simple_mean
     )
 
-    required_cols = ['theta_deg_R', 'theta_deg_L']
-    if use_weighted_mean:
-        required_cols.extend(['qx_R', 'qy_R', 'qx_L', 'qy_L'])
-
-    aligned = aligned.dropna(subset=required_cols).reset_index(drop=True)
-
-    if len(aligned) == 0:
+    if aligned.empty:
         return None
 
     t_plot = aligned['time_s'].to_numpy()
     theta_R_plot = aligned['theta_deg_R'].to_numpy()
     theta_L_plot = aligned['theta_deg_L'].to_numpy()
-
-    if use_weighted_mean:
-        qx_mean = (
-            aligned['qx_R'].to_numpy()
-            + aligned['qx_L'].to_numpy()
-        ) / 2.0
-        qy_mean = (
-            aligned['qy_R'].to_numpy()
-            + aligned['qy_L'].to_numpy()
-        ) / 2.0
-        theta_mean_plot = np.degrees(np.arctan2(qy_mean, qx_mean))
-    elif use_simple_mean:
-        theta_mean_plot = (theta_R_plot + theta_L_plot) / 2.0
-    else:
-        theta_mean_plot = mean_two_headings_by_vector(
-            theta_R_plot,
-            theta_L_plot
-        )
+    theta_mean_plot = aligned['theta_mean_deg'].to_numpy()
 
     true_heading_all = make_true_heading(t_plot)
 
@@ -1955,6 +1936,12 @@ def main():
         )
 
     print_section_rmse_tables(section_rmse_rows)
+
+    cdf_method_specs = [spec
+                        for spec in section_method_specs
+                        if spec[0] != '角速度累積法']
+
+    plot_four_method_absolute_error_cdf(cdf_method_specs)
 
     plot_gyro_heading_figure(
         gyro_heading_R,
