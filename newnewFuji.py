@@ -14,16 +14,16 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260630香川共同研究/KL1.csv'
-file_R = r'260630香川共同研究/KR1.csv'
-delay_time = 2.055392
-video_to_sensor_offset = 10.704
-limit_min_time = 3.51 + video_to_sensor_offset
-limit_max_time = 50.60 + video_to_sensor_offset
+file_L = r'260630香川共同研究/KL2.csv'
+file_R = r'260630香川共同研究/KR2.csv'
+delay_time = 2.243022
+video_to_sensor_offset = 10.451
+limit_min_time = 3.00 + video_to_sensor_offset
+limit_max_time = 49.52 + video_to_sensor_offset
 #真値
 true_headings = [90.0, -180.0, 90.0, 0.0, -90.0, -180.0, -90.0, 0.0]
-turn_start_times_video = [12.63, 17.07, 22.21, 26.79, 31.86, 36.44, 46.00]
-turn_end_times_video = [13.73, 18.27, 23.32, 27.86, 33.05, 37.57, 47.26]
+turn_start_times_video = [11.40, 15.88, 20.81, 25.32, 30.38, 34.87, 44.43]
+turn_end_times_video = [12.51, 16.96, 21.96, 26.45, 31.54, 36.00, 45.61]
 turn_start_times = [round(t + video_to_sensor_offset, 3) for t in turn_start_times_video]
 turn_end_times = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
 
@@ -59,7 +59,7 @@ WINDOW_RECOVERY_STEP = 1
 WINDOW_RECOVERY_INTERVAL = 5
 
 # Falseでは左右共通のAND条件，Trueでは左右独立の条件で窓幅を決定する。
-USE_INDEPENDENT_PREVIOUS_PC1_WINDOW = True
+USE_INDEPENDENT_PREVIOUS_PC1_WINDOW = False
 
 # センサ値を共通グリッドへ最近傍で割り当てる際の許容時間差の最大値
 SAMPLE_INTERVAL = 0.02
@@ -71,7 +71,7 @@ TIME_ZERO_SENSORS = ['Lacc', 'Gyro', 'GameRo']
 is_mask = 1
 is_mask_g = 1
 
-PRINT_SYNC_DIAGNOSTICS = True
+PRINT_SYNC_DIAGNOSTICS = False
 
 # 左右単体の結果も表示させるか
 SHOW_INDIVIDUAL_HEADINGS = False
@@ -975,34 +975,27 @@ def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
         .reset_index(drop=True)
     )
 
-    valid_count = len(valid_schedule)
-    print(f'PCA寄与率を計算できた時刻数: {valid_count}')
-
-    if valid_count == 0:
+    if len(valid_schedule) == 0:
         print('窓幅統計を計算できるデータがありません。')
         return
 
     mean_window = valid_schedule['window_size'].mean()
     min_window = int(valid_schedule['window_size'].min())
     max_window = int(valid_schedule['window_size'].max())
-    mean_removed_count = valid_schedule['removed_count'].mean()
     min_window_ratio = (
         valid_schedule['window_size'] == PCA_WINDOW_MIN
     ).mean()
-    forced_count = int(valid_schedule['forced_min_window'].sum())
     forced_ratio = valid_schedule['forced_min_window'].mean()
 
     print(f'平均窓幅: {mean_window:.4f}')
     print(f'最小窓幅: {min_window}')
     print(f'最大窓幅: {max_window}')
-    print(f'平均 removed_count: {mean_removed_count:.4f}')
     print(
         f'窓幅が{PCA_WINDOW_MIN}だった割合: '
         f'{min_window_ratio:.2%}'
     )
-    print(f'forced_min_window が True だった回数: {forced_count}')
     print(
-        'forced_min_window が True だった割合: '
+        f'最小窓幅{PCA_WINDOW_MIN}で強制採用した割合: '
         f'{forced_ratio:.2%}'
     )
 
@@ -1132,34 +1125,27 @@ def print_independent_previous_pc1_window_diagnostics(
         finite_mask = np.isfinite(schedule['pc1_ratio'])
         valid_schedule = schedule.loc[finite_mask].reset_index(drop=True)
 
-        valid_count = len(valid_schedule)
-        print(f'PCA寄与率を計算できた時刻数: {valid_count}')
-
-        if valid_count == 0:
+        if len(valid_schedule) == 0:
             print('窓幅統計を計算できるデータがありません。')
             continue
 
         mean_window = valid_schedule['window_size'].mean()
         min_window = int(valid_schedule['window_size'].min())
         max_window = int(valid_schedule['window_size'].max())
-        mean_removed_count = valid_schedule['removed_count'].mean()
         min_window_ratio = (
             valid_schedule['window_size'] == PCA_WINDOW_MIN
         ).mean()
-        forced_count = int(valid_schedule['forced_min_window'].sum())
         forced_ratio = valid_schedule['forced_min_window'].mean()
 
         print(f'平均窓幅: {mean_window:.4f}')
         print(f'最小窓幅: {min_window}')
         print(f'最大窓幅: {max_window}')
-        print(f'平均 removed_count: {mean_removed_count:.4f}')
         print(
             f'窓幅が{PCA_WINDOW_MIN}だった割合: '
             f'{min_window_ratio:.2%}'
         )
-        print(f'forced_min_window が True だった回数: {forced_count}')
         print(
-            'forced_min_window が True だった割合: '
+            f'最小窓幅{PCA_WINDOW_MIN}で強制採用した割合: '
             f'{forced_ratio:.2%}'
         )
 
@@ -1665,36 +1651,6 @@ def print_section_rmse_tables(section_rmse_rows):
         return
 
     section_rmse_df = pd.DataFrame(section_rmse_rows)
-    detail_cols = [
-        'method',
-        'section_name',
-        'section_kind_label',
-        'start_time_s',
-        'end_time_s',
-        'right_rmse_deg',
-        'left_rmse_deg',
-        'mean_rmse_deg'
-    ]
-
-    detail_df = section_rmse_df[detail_cols].rename(columns={
-        'method': '手法',
-        'section_name': '区間',
-        'section_kind_label': '区間種類',
-        'start_time_s': '開始時刻[s]',
-        'end_time_s': '終了時刻[s]',
-        'right_rmse_deg': '右手RMSE[deg]',
-        'left_rmse_deg': '左手RMSE[deg]',
-        'mean_rmse_deg': '左右平均RMSE[deg]'
-    })
-
-    print('\n=== 15区間それぞれのRMSE ===')
-    print(
-        detail_df.to_string(
-            index=False,
-            float_format=lambda x: f'{x:.4f}'
-        )
-    )
-
     summary_df = make_section_rmse_summary(section_rmse_df)
     summary_order = ['直進歩行区間平均', '方向転換区間平均', '全15区間平均']
     method_order = [
@@ -1799,8 +1755,7 @@ def plot_pca_method_absolute_error_cdf(method_specs):
             where='post',
             label=(
                 f'{method_name} '
-                f'(n={len(cdf_df)})'
-            ),
+                            ),
             color=color_map.get(method_name),
             linewidth=2.0,
             alpha=0.9
@@ -1819,17 +1774,14 @@ def plot_pca_method_absolute_error_cdf(method_specs):
         )
 
     ax.set_xlabel(
-        '左右平均方位の絶対誤差 [deg]',
+        '左右平均の絶対誤差 [deg]',
         fontsize=16
     )
     ax.set_ylabel(
         '累積確率',
         fontsize=16
     )
-    ax.set_title(
-        'PCA手法の左右平均方位絶対誤差の累積分布関数'
-    )
-
+    
     # 絶対角度誤差なので、横軸の最小値は0度。
     ax.set_xlim(left=0.0)
 
