@@ -247,7 +247,7 @@ def add_turn_regions_to_axis(ax, turn_starts, turn_ends):
     for i, (start, end) in enumerate(zip(turn_starts, turn_ends)):
         region_label = '方向転換区間' if i == 0 else None
 
-        ax.axvspan(start, end, facecolor = 'green', alpha = 0.12, edgecolor = 'none',
+        ax.axvspan(start, end, facecolor = 'gray', alpha = 0.12, edgecolor = 'none',
                    linewidth = 0, zorder = 0, label = region_label)
 
 
@@ -2080,7 +2080,86 @@ def plot_pc1_window_control(window_schedule_common):
     plt.tight_layout()
     plt.show()
 
+    # PCA窓幅の時系列変化を歩行時刻範囲に絞る
+def prepare_pca_window_size_plot_df(window_schedule):
+    if window_schedule is None or len(window_schedule) == 0:
+            return pd.DataFrame()
 
+    plot_window = window_schedule.copy()
+
+    mask = ((plot_window['time_s'] >= limit_min_time) & (plot_window['time_s'] <= limit_max_time))
+
+    return plot_window.loc[mask].reset_index(drop=True)
+
+    # PCA計算前は黒の点線、計算開始後は実際の窓幅を実線でプロット
+def plot_previous_pc1_window_size(window_schedule_previous_pc1_L, window_schedule_previous_pc1_R):
+
+    if USE_INDEPENDENT_PREVIOUS_PC1_WINDOW:
+        fig, axes = plt.subplots(1, 2, figsize = (16,5), sharex=True, sharey= True)
+
+        plot_specs = [(axes[0], window_schedule_previous_pc1_L, '左手'), (axes[1], window_schedule_previous_pc1_R, '右手')]
+
+        fig.suptitle('左右独立型におけるPCA窓幅の時系列変化', fontsize = 16)
+
+    else:
+        fig, ax = plt.subplots(1, 1, figsize = (12,5))
+
+        plot_specs = [(ax, window_schedule_previous_pc1_L, None)]
+
+        ax.set_title('PCA窓幅の時系列変化', fontsize=16)
+
+    for ax_window, window_schedule, hand_label in plot_specs:
+        plot_window = prepare_pca_window_size_plot_df(window_schedule)
+
+        add_turn_regions_to_axis(ax_window, turn_start_times, turn_end_times)
+
+        if len(plot_window) == 0:
+            ax_window.text(0.5, 0.5, 'プロットするデータが存在しません', ha = 'center', va = 'center', transform=ax_window.transAxes)
+
+        else:
+            if 'pc1_ratio' in plot_window.columns:
+                pca_valid_mask = np.isfinite(plot_window['pc1_ratio'])
+
+            else:
+                pca_valid_mask = (np.isfinite(plot_window['pc1_ratio_L']) & np.isfinite(plot_window['pc1_ratio_R']))
+                
+            valid_positions = np.flatnonzero(pca_valid_mask.to_numpy())
+
+            if len(valid_positions) == 0:
+                print('PCAを計算できませんでした')
+
+            else:
+                first_valid_position = int(valid_positions[0])
+
+                first_valid_time = float(plot_window['time_s'].iloc[first_valid_position])
+
+            if first_valid_time > limit_min_time:
+                ax_window.plot([limit_min_time,first_valid_time], [PCA_WINDOW_MIN,PCA_WINDOW_MIN], c='k', linestyle = '--',
+                                linewidth = 2.0)
+
+            valid_window = (plot_window.iloc[first_valid_position:].reset_index(drop=True))
+
+            ax_window.step(valid_window['time_s'], valid_window['window_size'], where='post', c='tab:blue', linestyle='-',
+                            linewidth=1.7, alpha= 1.0, label='PCA窓幅')
+
+            ax_window.set_xlim(limit_min_time, limit_max_time)
+            ax_window.set_ylim(PCA_WINDOW_MIN - 1, PCA_WINDOW_MAX + 1)
+            ax_window.set_yticks(np.arange(PCA_WINDOW_MIN, PCA_WINDOW_MAX + 1, 5))
+
+            ax_window.set_xlabel('時刻 [s]', fontsize=16)
+            ax_window.set_ylabel('PCA窓幅', fontsize=16)
+
+            ax_window.grid(True, alpha = 0.5)
+
+            if hand_label is not None:
+                ax_window.set_title(hand_label)
+
+            ax_window.legend()
+
+    plt.tight_layout()
+    plt.show()
+        
+                
 # =========================================================
 # Main
 # =========================================================
@@ -2419,6 +2498,9 @@ def main():
     )
 
     plot_pc1_window_control(window_schedule_common)
+
+    # 前時刻比較型におけるPCA窓幅の時系列変化をプロット
+    plot_previous_pc1_window_size(window_schedule_previous_pc1_L, window_schedule_previous_pc1_R)
 
 
 if __name__ == '__main__':
