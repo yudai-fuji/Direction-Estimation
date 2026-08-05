@@ -955,6 +955,44 @@ def make_common_window_schedule_by_previous_pc1(
     })
 
 
+def print_previous_pc1_window_section_statistics(valid_schedule):
+    time_s = valid_schedule['time_s'].to_numpy()
+    walking_mask = (
+        (time_s >= limit_min_time)
+        & (time_s <= limit_max_time)
+    )
+    turn_mask = np.zeros(len(valid_schedule), dtype=bool)
+
+    for turn_start, turn_end in zip(turn_start_times, turn_end_times):
+        turn_mask |= (
+            (time_s >= turn_start)
+            & (time_s < turn_end)
+        )
+
+    turn_schedule = valid_schedule.loc[walking_mask & turn_mask]
+    straight_schedule = valid_schedule.loc[walking_mask & ~turn_mask]
+
+    turn_min_window_ratio = (
+        turn_schedule['window_size'] == PCA_WINDOW_MIN
+    ).mean()
+    turn_mean_window = turn_schedule['window_size'].mean()
+    straight_min_window_ratio = (
+        straight_schedule['window_size'] == PCA_WINDOW_MIN
+    ).mean()
+    straight_mean_window = straight_schedule['window_size'].mean()
+
+    print(
+        f'方向転換区間の窓幅が{PCA_WINDOW_MIN}だった割合: '
+        f'{turn_min_window_ratio:.2%}'
+    )
+    print(f'方向転換区間の窓幅の平均: {turn_mean_window:.4f}')
+    print(
+        f'直進区間の窓幅が{PCA_WINDOW_MIN}だった割合: '
+        f'{straight_min_window_ratio:.2%}'
+    )
+    print(f'直進区間の窓幅の平均: {straight_mean_window:.4f}')
+
+
 # 前時刻比較型可変窓の採用状況を表示する。
 def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
     print('\n=== 前時刻寄与率比較型可変窓の診断 ===')
@@ -985,7 +1023,6 @@ def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
     min_window_ratio = (
         valid_schedule['window_size'] == PCA_WINDOW_MIN
     ).mean()
-    forced_ratio = valid_schedule['forced_min_window'].mean()
 
     print(f'平均窓幅: {mean_window:.4f}')
     print(f'最小窓幅: {min_window}')
@@ -994,10 +1031,7 @@ def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
         f'窓幅が{PCA_WINDOW_MIN}だった割合: '
         f'{min_window_ratio:.2%}'
     )
-    print(
-        f'最小窓幅{PCA_WINDOW_MIN}で強制採用した割合: '
-        f'{forced_ratio:.2%}'
-    )
+    print_previous_pc1_window_section_statistics(valid_schedule)
 
 
 # 左右独立方式で使う片側分の空スケジュールを作る。
@@ -1135,7 +1169,6 @@ def print_independent_previous_pc1_window_diagnostics(
         min_window_ratio = (
             valid_schedule['window_size'] == PCA_WINDOW_MIN
         ).mean()
-        forced_ratio = valid_schedule['forced_min_window'].mean()
 
         print(f'平均窓幅: {mean_window:.4f}')
         print(f'最小窓幅: {min_window}')
@@ -1144,10 +1177,7 @@ def print_independent_previous_pc1_window_diagnostics(
             f'窓幅が{PCA_WINDOW_MIN}だった割合: '
             f'{min_window_ratio:.2%}'
         )
-        print(
-            f'最小窓幅{PCA_WINDOW_MIN}で強制採用した割合: '
-            f'{forced_ratio:.2%}'
-        )
+        print_previous_pc1_window_section_statistics(valid_schedule)
 
 
 # 加速度PCA結果が空になる場合の列構造だけを持つDataFrameを作る。
