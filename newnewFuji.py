@@ -50,7 +50,7 @@ PCA_WINDOW_MIN = 30
 PCA_PC1_LOW_THRESHOLD = 0.75
 
 # 左右両方の第一主成分寄与率がこの値を上回ったら窓幅回復の条件を満たす。
-PCA_PC1_HIGH_THRESHOLD = 0.75
+PCA_PC1_HIGH_THRESHOLD = 0.875
 
 # 窓幅回復開始からこの本数ごとに窓幅を回復させる。
 WINDOW_RECOVERY_STEP = 1
@@ -79,6 +79,9 @@ SHOW_INDIVIDUAL_HEADINGS = False
 # 推定結果を点で表示するか
 PLOT_HEADING_AS_POINTS = True
 
+# 標準化を行うか
+APPLY_PCA_STANDARDIZATION = False
+
 # 回転後の水平加速度にローパスフィルタをかけてからPCAに渡すか
 APPLY_ACC_LOWPASS = False
 ACC_LOWPASS_ALPHA = 0.2
@@ -98,6 +101,17 @@ def angle_diff_pm180(pred_deg, true_deg):
     pred_deg = np.asarray(pred_deg, dtype=float)
     true_deg = np.asarray(true_deg, dtype=float)
     return np.mod((pred_deg - true_deg) + 180.0, 360.0) - 180.0
+
+# 標準化用関数
+def standardize_pca_window(data_window):
+    data_window = np.asarray(data_window, dtype=float)
+
+    mean = np.mean(data_window, axis=0)
+    std = np.std(data_window, axis=0, ddof=0)
+
+    std_safe = np.where(std > 1e-12, std, 1.0)
+
+    return (data_window - mean) / std_safe
 
 
 def mean_two_headings_by_vector(theta_R_deg, theta_L_deg):
@@ -665,6 +679,9 @@ def compute_pc1_ratio_for_window(x_rotated, y_rotated, frame, window_size, pca):
         x_rotated[start_index:end_index],
         y_rotated[start_index:end_index]
     ))
+
+    if APPLY_PCA_STANDARDIZATION:
+        data_window = standardize_pca_window(data_window)
 
     pca.fit(data_window)
     return float(pca.explained_variance_ratio_[0])
@@ -1274,6 +1291,9 @@ def compute_acc_pca_core(
             x_rotated[start_index:end_index],
             y_rotated[start_index:end_index]
         ))
+
+        if APPLY_PCA_STANDARDIZATION:
+            data_window = standardize_pca_window(data_window)
 
         pca.fit(data_window)
         vx, vy = pca.components_[0]
