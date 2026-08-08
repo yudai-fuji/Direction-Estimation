@@ -14,16 +14,16 @@ except ImportError:
 # =========================================================
 # User settings
 # =========================================================
-file_L = r'260630香川共同研究/KL2.csv'
-file_R = r'260630香川共同研究/KR2.csv'
-delay_time = 2.243022
-video_to_sensor_offset = 10.451
-limit_min_time = 3.00 + video_to_sensor_offset
-limit_max_time = 49.52 + video_to_sensor_offset
+file_L = r'260630香川共同研究/ML2.csv'
+file_R = r'260630香川共同研究/MR2.csv'
+delay_time = 3.513334
+video_to_sensor_offset = 12.458
+limit_min_time = 2.88 + video_to_sensor_offset
+limit_max_time = 48.30 + video_to_sensor_offset
 #真値
 true_headings = [90.0, -180.0, 90.0, 0.0, -90.0, -180.0, -90.0, 0.0]
-turn_start_times_video = [11.40, 15.88, 20.81, 25.32, 30.38, 34.87, 44.43]
-turn_end_times_video = [12.51, 16.96, 21.96, 26.45, 31.54, 36.00, 45.61]
+turn_start_times_video = [10.79, 15.20, 20.59, 24.87, 29.66, 34.01, 43.20]
+turn_end_times_video = [11.96, 16.31, 21.72, 25.98, 30.82, 35.16, 44.32]
 turn_start_times = [round(t + video_to_sensor_offset, 3) for t in turn_start_times_video]
 turn_end_times = [round(t + video_to_sensor_offset, 3) for t in turn_end_times_video]
 
@@ -1833,7 +1833,7 @@ def plot_pca_method_absolute_error_cdf(method_specs):
     )
     
     # 絶対角度誤差なので、横軸の最小値は0度。
-    ax.set_xlim(left=0.0)
+    ax.set_xlim(0.0, 60.0)
 
     # CDFの値域は0～1。
     ax.set_ylim(0.0, 1.0)
