@@ -13,12 +13,13 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'251209星田共同研究\HwL2.csv'
-file_R = r'251209星田共同研究\HwR2.csv'
-delay_time = 3.06
-cod_time = 21.99
-limit_min_time = 13.4
-limit_max_time = 27.75
+file_L = r'260814_片岡歩行データ/kataoka_L5.csv'
+file_R = r'260814_片岡歩行データ/kataoka_R5.csv'
+delay_time = 3.479035
+timer_start_time = 6.26
+cod_time = 20.16 + timer_start_time
+limit_min_time = 9.33 + timer_start_time
+limit_max_time = 30.0 + timer_start_time
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
@@ -35,8 +36,8 @@ is_mask_g = 0     # 角度表示 1: [-180，180) に変換，1以外: 指定な�
 # 実行する手法の選択
 # =========================================================
 DO_ACC_PCA = True              # 加速度PCA法
-DO_PROPOSED_ACC_PCA = True     # 寄与率重み付き加速度PCA法
-DO_GYRO_INTEGRAL = False        # 角速度累積法
+DO_PROPOSED_ACC_PCA = False     # 寄与率重み付き加速度PCA法
+DO_GYRO_INTEGRAL = True        # 角速度累積法
 DO_GYRO_PCA = False             # 角速度PCA法
 
 
@@ -117,7 +118,7 @@ def print_pca_summary(df, label):
 # 右手RMSE，左手RMSEは単体評価
 # 左右平均RMSEのみベクトル平均を用いる
 # =========================================================
-def calc_rms_from_headings(heading_R, heading_L):
+def calc_rms_from_headings(heading_R, heading_L, mean_method='vector'):
     heading_L = heading_L.copy()
     heading_R = heading_R.copy()
 
@@ -143,8 +144,11 @@ def calc_rms_from_headings(heading_R, heading_L):
     theta_R_all = aligned['theta_deg_R'].to_numpy()
     theta_L_all = aligned['theta_deg_L'].to_numpy()
 
-    # 左右平均はベクトル平均で計算
-    theta_mean_all = vector_mean_two_angles_deg(theta_R_all, theta_L_all)
+    # 角速度累積法のみ算術平均，それ以外は従来どおりベクトル平均
+    if mean_method == 'arithmetic':
+        theta_mean_all = (theta_R_all + theta_L_all) / 2.0
+    else:
+        theta_mean_all = vector_mean_two_angles_deg(theta_R_all, theta_L_all)
 
     t_all = aligned['time_s'].to_numpy()
     mask = (t_all >= limit_min_time) & (t_all <= limit_max_time)
@@ -363,7 +367,8 @@ def plot_heading_timeseries(
     ylabel_str,
     plot_as_points=False,
     ax=None,
-    show=True
+    show=True,
+    mean_method='vector'
 ):
     heading_R = heading_R.sort_values('time_s').reset_index(drop=True).copy()
     heading_L = heading_L.sort_values('time_s').reset_index(drop=True).copy()
@@ -389,8 +394,11 @@ def plot_heading_timeseries(
     theta_R_plot = aligned['theta_deg_R'].to_numpy()
     theta_L_plot = aligned['theta_deg_L'].to_numpy()
 
-    # 左右平均はベクトル平均で計算
-    theta_mean_plot = vector_mean_two_angles_deg(theta_R_plot, theta_L_plot)
+    # 角速度累積法のみ算術平均，それ以外は従来どおりベクトル平均
+    if mean_method == 'arithmetic':
+        theta_mean_plot = (theta_R_plot + theta_L_plot) / 2.0
+    else:
+        theta_mean_plot = vector_mean_two_angles_deg(theta_R_plot, theta_L_plot)
 
     true_heading_all = np.where(t_plot <= cod_time, 90.0, 0.0)
 
@@ -416,13 +424,14 @@ def plot_heading_timeseries(
         _, ax = plt.subplots(figsize=(10, 6))
 
     if plot_as_points:
-        #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
-        #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
-        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
+        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=4, alpha=0.8)
+        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=4, alpha=0.8)
+        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=4, alpha=0.8)
     else:
         ax.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
         ax.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
         ax.plot(t_plot, theta_mean_plot, label='左右平均', c='g', linewidth=2, alpha=0.8)
+
     ax.plot(t_plot, true_heading_all, label='真値', c='k', linestyle='--', alpha=0.8)
 
     ax.set_xlabel('時間 [s]')
@@ -506,9 +515,9 @@ def plot_heading_timeseries_weighted_vectors(
         _, ax = plt.subplots(figsize=(10, 6))
 
     if plot_as_points:
-        #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=12, alpha=0.8)
-        #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=12, alpha=0.8)
-        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=8, alpha=0.8)
+        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=4, alpha=0.8)
+        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=4, alpha=0.8)
+        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=4, alpha=0.8)
     else:
         ax.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
         ax.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
@@ -1122,8 +1131,12 @@ if DO_RMSE:
         rmse_rows.append(['寄与率重み付き加速度PCA法', RMS_R, RMS_L, RMS_mean])
 
     if DO_GYRO_INTEGRAL and heading_R_gyro is not None and heading_L_gyro is not None:
-        RMS_R, RMS_L, RMS_mean = calc_rms_from_headings(heading_R_gyro, heading_L_gyro)
-        rmse_rows.append(['角速度累積法', RMS_R, RMS_L, RMS_mean])
+        RMS_R, RMS_L, RMS_mean = calc_rms_from_headings(
+        heading_R_gyro,
+        heading_L_gyro,
+        mean_method='arithmetic'
+    )
+    rmse_rows.append(['角速度累積法', RMS_R, RMS_L, RMS_mean])
 
     if DO_GYRO_PCA and heading_R_gyro_pca is not None and heading_L_gyro_pca is not None:
         RMS_R, RMS_L, RMS_mean = calc_rms_from_headings(heading_R_gyro_pca, heading_L_gyro_pca)
@@ -1188,7 +1201,8 @@ if PLOT_GYRO_INTEGRAL:
             heading_R_gyro,
             heading_L_gyro,
             title_str='時系列変化（角速度累積法）',
-            ylabel_str='推定進行方向 [°]'
+            ylabel_str='推定進行方向 [°]',
+            mean_method='arithmetic'
         )
     else:
         print("角速度累積法の時系列プロットは，手法がOFFのためスキップしました．")
