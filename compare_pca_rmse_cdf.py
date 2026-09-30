@@ -1,3 +1,9 @@
+# 研究会用に作成
+# 加速度PCAにおける，固定窓・可変窓2手法のCDF，推定進行方向の時系列変化，RMSEを出力
+
+from contextlib import redirect_stdout
+from io import StringIO
+
 import math
 
 import matplotlib.pyplot as plt
@@ -86,8 +92,15 @@ APPLY_PCA_STANDARDIZATION = False
 APPLY_ACC_LOWPASS = False
 ACC_LOWPASS_ALPHA = 0.2
 
+# CDFでは手法別の色、時系列では左=青・右=赤・左右平均=緑を使用する。
+COLOR_FIXED = '#0072B2'
+COLOR_THRESHOLD = '#E69F00'
+COLOR_PREVIOUS = '#009E73'
 
-# 角度を-180度以上180度未満の範囲へ正規化する。
+
+# =========================================================
+# 角度・標準化・ローパスフィルタ
+# =========================================================
 def wrap_pm180(theta_deg):
     if is_mask_g == 1:
         theta_deg = np.asarray(theta_deg, dtype=float)
@@ -96,13 +109,12 @@ def wrap_pm180(theta_deg):
     return theta_deg
 
 
-# 推定角度と真値角度の差を-180度以上180度未満で求める。
 def angle_diff_pm180(pred_deg, true_deg):
     pred_deg = np.asarray(pred_deg, dtype=float)
     true_deg = np.asarray(true_deg, dtype=float)
     return np.mod((pred_deg - true_deg) + 180.0, 360.0) - 180.0
 
-# 標準化用関数
+
 def standardize_pca_window(data_window):
     data_window = np.asarray(data_window, dtype=float)
 
@@ -145,7 +157,9 @@ def exponential_lowpass(values, alpha):
     return filtered
 
 
-# 8回の直進歩行区間と7回の方向転換区間の設定を確認する。
+# =========================================================
+# 真値と評価区間
+# =========================================================
 def validate_true_heading_settings():
     if len(true_headings) != 8:
         raise ValueError(
@@ -254,23 +268,14 @@ def make_true_heading(time_s):
 
     return result
 
-def add_turn_regions_to_axis(ax, turn_starts, turn_ends):
-    if len(turn_starts) != len(turn_ends):
-        raise ValueError('方向転換開始時刻と終了時刻の個数が一致していません')
 
-    for i, (start, end) in enumerate(zip(turn_starts, turn_ends)):
-        region_label = '方向転換区間' if i == 0 else None
-
-        ax.axvspan(start, end, facecolor = 'gray', alpha = 0.12, edgecolor = 'none',
-                   linewidth = 0, zorder = 0, label = region_label)
-
-
-
+# =========================================================
+# クォータニオンと姿勢補償
+# =========================================================
 def kyoyaku(gx, gy, gz, gw):
     return (-gx, -gy, -gz, gw)
 
 
-# 初期姿勢を基準にした相対クォータニオンを計算する。
 def calc_relative_quaternion(gx, gy, gz, gw, initial_quat):
     gx0, gy0, gz0, gw0 = initial_quat
 
@@ -291,7 +296,6 @@ def calc_relative_quaternion(gx, gy, gz, gw, initial_quat):
     return gwc, gxc, gyc, gzc
 
 
-# GameRoの姿勢情報で3軸ベクトルを初期姿勢基準の座標系へ回転する。
 def rotate_xyz_by_gamero(x, y, z, gx, gy, gz, gw, initial_quat):
     gwc, gxc, gyc, gzc = calc_relative_quaternion(
         gx, gy, gz, gw,
@@ -320,9 +324,8 @@ def rotate_xyz_by_gamero(x, y, z, gx, gy, gz, gw, initial_quat):
 
 
 # =========================================================
-# Sensor synchronization
+# CSV読み込み・時刻同期
 # =========================================================
-# センサCSVを読み込み，基準時刻からの秒時刻と初期姿勢を取得する。
 def load_sensor_file_with_time(file_path, time_offset_s=0.0):
     df = pd.read_csv(file_path)
 
@@ -355,7 +358,6 @@ def load_sensor_file_with_time(file_path, time_offset_s=0.0):
     return df, initial_quat
 
 
-# 指定センサの有効な時刻範囲を取得する。
 def get_sensor_time_range(df, sensor_name):
     sensor_df = df[df['Sensor'] == sensor_name]
 
@@ -365,7 +367,6 @@ def get_sensor_time_range(df, sensor_name):
     return sensor_df['time_s'].min(), sensor_df['time_s'].max()
 
 
-# 左右センサが共通して持つ時間範囲に等間隔の時刻グリッドを作る。
 def make_common_grid(df_L, df_R, required_sensors):
     starts = []
     ends = []
@@ -395,7 +396,6 @@ def make_common_grid(df_L, df_R, required_sensors):
     return grid_df, overlap_start, overlap_end
 
 
-# 指定センサの値を共通時刻グリッドへ最近傍で割り当てる。
 def nearest_sensor_to_grid(df, sensor_name, grid_df):
     sensor_df = (
         df[df['Sensor'] == sensor_name]
@@ -442,7 +442,6 @@ def nearest_sensor_to_grid(df, sensor_name, grid_df):
     return matched[use_cols]
 
 
-# 片側の複数センサ値を共通時刻グリッド上に同期した表へまとめる。
 def build_synced_side(df, grid_df, required_sensors):
     synced = grid_df.copy()
 
@@ -458,7 +457,6 @@ def build_synced_side(df, grid_df, required_sensors):
     return synced
 
 
-# 同期後データの採用点数や時刻ずれを表示する。
 def print_sync_diagnostics(sync_df, side_label, required_sensors):
     print(f'\n=== {side_label}端末の共通グリッド同期状況 ===')
     print(f'共通グリッド点数: {len(sync_df)}')
@@ -484,7 +482,6 @@ def print_sync_diagnostics(sync_df, side_label, required_sensors):
         )
 
 
-# 左右CSVを読み込み，同期済みデータと初期姿勢をまとめて返す。
 def prepare_synchronized_sensor_data():
     required_sensors = ['Lacc', 'Gyro', 'GameRo']
 
@@ -525,7 +522,9 @@ def prepare_synchronized_sensor_data():
     }
 
 
-# 回転補正したZ軸角速度を時間積分して方位角を推定する。
+# =========================================================
+# 180度補正に用いる角速度累積方位
+# =========================================================
 def compute_heading_gyro_integral_from_synced(
     sync_df,
     initial_quat,
@@ -606,9 +605,8 @@ def make_gyro_mean_heading(gyro_heading_R, gyro_heading_L):
 
 
 # =========================================================
-# Acceleration PCA
+# 水平加速度・PCA・窓幅制御・180度補正
 # =========================================================
-# 回転補正済みの水平加速度をPCA入力用の時系列として作る。
 def prepare_acc_pca_data(sync_df, initial_quat):
     required_cols = [
         'time_s',
@@ -720,7 +718,6 @@ def update_window_size_from_pc1(current_window, recovery_count, pc1_ratio_L, pc1
     return current_window, 0
 
 
-# 左右のPC1寄与率から，共通のPCA窓幅時系列を作る。
 def make_common_window_schedule_from_pc1(
     sync_L,
     initial_quat_L,
@@ -814,7 +811,6 @@ def make_common_window_schedule_from_pc1(
     })
 
 
-# 前時刻比較型可変窓の空スケジュールを作る。
 def empty_previous_pc1_window_schedule_df():
     return pd.DataFrame(columns=[
         'time_s',
@@ -826,7 +822,6 @@ def empty_previous_pc1_window_schedule_df():
     ])
 
 
-# 前時刻に採用した左右PC1寄与率との比較から，共通のPCA窓幅時系列を作る。
 def make_common_window_schedule_by_previous_pc1(
     sync_L,
     initial_quat_L,
@@ -972,86 +967,6 @@ def make_common_window_schedule_by_previous_pc1(
     })
 
 
-def print_previous_pc1_window_section_statistics(valid_schedule):
-    time_s = valid_schedule['time_s'].to_numpy()
-    walking_mask = (
-        (time_s >= limit_min_time)
-        & (time_s <= limit_max_time)
-    )
-    turn_mask = np.zeros(len(valid_schedule), dtype=bool)
-
-    for turn_start, turn_end in zip(turn_start_times, turn_end_times):
-        turn_mask |= (
-            (time_s >= turn_start)
-            & (time_s < turn_end)
-        )
-
-    turn_schedule = valid_schedule.loc[walking_mask & turn_mask]
-    straight_schedule = valid_schedule.loc[walking_mask & ~turn_mask]
-
-    turn_min_window_ratio = (
-        turn_schedule['window_size'] == PCA_WINDOW_MIN
-    ).mean()
-    turn_mean_window = turn_schedule['window_size'].mean()
-    straight_min_window_ratio = (
-        straight_schedule['window_size'] == PCA_WINDOW_MIN
-    ).mean()
-    straight_mean_window = straight_schedule['window_size'].mean()
-
-    print(
-        f'方向転換区間の窓幅が{PCA_WINDOW_MIN}だった割合: '
-        f'{turn_min_window_ratio:.2%}'
-    )
-    print(f'方向転換区間の窓幅の平均: {turn_mean_window:.4f}')
-    print(
-        f'直進区間の窓幅が{PCA_WINDOW_MIN}だった割合: '
-        f'{straight_min_window_ratio:.2%}'
-    )
-    print(f'直進区間の窓幅の平均: {straight_mean_window:.4f}')
-
-
-# 前時刻比較型可変窓の採用状況を表示する。
-def print_previous_pc1_window_diagnostics(window_schedule_previous_pc1):
-    print('\n=== 前時刻寄与率比較型可変窓の診断 ===')
-
-    if (
-        window_schedule_previous_pc1 is None
-        or len(window_schedule_previous_pc1) == 0
-    ):
-        print('診断できる窓幅スケジュールがありません。')
-        return
-
-    finite_mask = (
-        np.isfinite(window_schedule_previous_pc1['pc1_ratio_L'])
-        & np.isfinite(window_schedule_previous_pc1['pc1_ratio_R'])
-    )
-    valid_schedule = (
-        window_schedule_previous_pc1.loc[finite_mask]
-        .reset_index(drop=True)
-    )
-
-    if len(valid_schedule) == 0:
-        print('窓幅統計を計算できるデータがありません。')
-        return
-
-    mean_window = valid_schedule['window_size'].mean()
-    min_window = int(valid_schedule['window_size'].min())
-    max_window = int(valid_schedule['window_size'].max())
-    min_window_ratio = (
-        valid_schedule['window_size'] == PCA_WINDOW_MIN
-    ).mean()
-
-    print(f'平均窓幅: {mean_window:.4f}')
-    print(f'最小窓幅: {min_window}')
-    print(f'最大窓幅: {max_window}')
-    print(
-        f'窓幅が{PCA_WINDOW_MIN}だった割合: '
-        f'{min_window_ratio:.2%}'
-    )
-    print_previous_pc1_window_section_statistics(valid_schedule)
-
-
-# 左右独立方式で使う片側分の空スケジュールを作る。
 def empty_independent_previous_pc1_window_schedule_df():
     return pd.DataFrame(columns=[
         'time_s',
@@ -1062,7 +977,6 @@ def empty_independent_previous_pc1_window_schedule_df():
     ])
 
 
-# 片側の前時刻PC1寄与率との比較から，独立したPCA窓幅時系列を作る。
 def make_independent_window_schedule_by_previous_pc1(
     sync_df,
     initial_quat
@@ -1154,50 +1068,6 @@ def make_independent_window_schedule_by_previous_pc1(
     })
 
 
-# 左右独立方式の窓幅採用状況を片側ずつ表示する。
-def print_independent_previous_pc1_window_diagnostics(
-    window_schedule_previous_pc1_L,
-    window_schedule_previous_pc1_R
-):
-    print('\n=== 前時刻寄与率比較型可変窓・左右独立方式の診断 ===')
-
-    side_schedules = [
-        ('左手', window_schedule_previous_pc1_L),
-        ('右手', window_schedule_previous_pc1_R)
-    ]
-
-    for side_label, schedule in side_schedules:
-        print(f'\n--- {side_label} ---')
-
-        if schedule is None or len(schedule) == 0:
-            print('診断できる窓幅スケジュールがありません。')
-            continue
-
-        finite_mask = np.isfinite(schedule['pc1_ratio'])
-        valid_schedule = schedule.loc[finite_mask].reset_index(drop=True)
-
-        if len(valid_schedule) == 0:
-            print('窓幅統計を計算できるデータがありません。')
-            continue
-
-        mean_window = valid_schedule['window_size'].mean()
-        min_window = int(valid_schedule['window_size'].min())
-        max_window = int(valid_schedule['window_size'].max())
-        min_window_ratio = (
-            valid_schedule['window_size'] == PCA_WINDOW_MIN
-        ).mean()
-
-        print(f'平均窓幅: {mean_window:.4f}')
-        print(f'最小窓幅: {min_window}')
-        print(f'最大窓幅: {max_window}')
-        print(
-            f'窓幅が{PCA_WINDOW_MIN}だった割合: '
-            f'{min_window_ratio:.2%}'
-        )
-        print_previous_pc1_window_section_statistics(valid_schedule)
-
-
-# 加速度PCA結果が空になる場合の列構造だけを持つDataFrameを作る。
 def empty_acc_pca_df(use_ratio_weight):
     if use_ratio_weight:
         return pd.DataFrame(columns=[
@@ -1212,7 +1082,6 @@ def empty_acc_pca_df(use_ratio_weight):
     ])
 
 
-# PCA計算用データへ固定窓または可変窓の窓幅を付与する。
 def attach_window_schedule(data, window_schedule_df, default_window_size):
     if window_schedule_df is None:
         data = data.copy()
@@ -1238,7 +1107,6 @@ def attach_window_schedule(data, window_schedule_df, default_window_size):
     return data
 
 
-# 回転補正した水平加速度にPCAをかけて進行方向を推定する中核処理を行う。
 def compute_acc_pca_core(
     sync_df,
     initial_quat,
@@ -1357,7 +1225,6 @@ def compute_acc_pca_core(
     return heading_df
 
 
-# 固定窓の通常加速度PCAで進行方向を推定する。
 def compute_heading_acc_pca_from_synced(sync_df, initial_quat, window_size=WINDOW_SIZE):
     return compute_acc_pca_core(
         sync_df,
@@ -1368,22 +1235,6 @@ def compute_heading_acc_pca_from_synced(sync_df, initial_quat, window_size=WINDO
     )
 
 
-# 固定窓の寄与率重み付き加速度PCAで進行方向を推定する。
-def compute_heading_acc_pca_proposed_from_synced(
-    sync_df,
-    initial_quat,
-    window_size=WINDOW_SIZE
-):
-    return compute_acc_pca_core(
-        sync_df,
-        initial_quat,
-        window_size=window_size,
-        window_schedule_df=None,
-        use_ratio_weight=True
-    )
-
-
-# PC1寄与率で決めた可変窓を使って加速度PCAの進行方向を推定する。
 def compute_heading_acc_pca_variable_from_synced(
     sync_df,
     initial_quat,
@@ -1399,7 +1250,6 @@ def compute_heading_acc_pca_variable_from_synced(
     )
 
 
-# ジャイロ積分方位を基準にPCA方位の180度反転を補正する。
 def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False):
     if heading_df is None or len(heading_df) == 0:
         return heading_df
@@ -1469,9 +1319,8 @@ def resolve_pca_180_by_gyro(heading_df, gyro_heading_df, use_ratio_weight=False)
 
 
 # =========================================================
-# RMSE and improvement
+# 区間RMSEと絶対角度誤差CDF
 # =========================================================
-# 各手法のRMSE比較表を表示する。
 def finite_mean(values):
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -1694,170 +1543,9 @@ def make_section_rmse_summary(section_rmse_df):
     return pd.DataFrame(summary_rows)
 
 
-def print_section_rmse_tables(section_rmse_rows):
-    if len(section_rmse_rows) == 0:
-        print('\n=== 区間別RMSE ===')
-        print('表示するRMSEがありません。')
-        return
-
-    section_rmse_df = pd.DataFrame(section_rmse_rows)
-    summary_df = make_section_rmse_summary(section_rmse_df)
-    summary_order = ['直進歩行区間平均', '方向転換区間平均', '全15区間平均']
-    method_order = [
-        '固定窓PCA',
-        '固定窓・寄与率重み付きPCA',
-        '可変窓PCA',
-        '可変窓・寄与率重み付きPCA',
-        '前時刻比較型可変窓PCA',
-        '前時刻比較型可変窓・寄与率重み付きPCA',
-        '左右独立・前時刻比較型可変窓PCA',
-        '左右独立・前時刻比較型可変窓・寄与率重み付きPCA',
-        '角速度累積法'
-    ]
-    side_specs = [
-        ('右手', 'right_rmse_deg'),
-        ('左手', 'left_rmse_deg'),
-        ('左右平均', 'mean_rmse_deg')
-    ]
-
-    for side_label, rmse_col in side_specs:
-        side_summary = (
-            summary_df
-            .pivot(index='method', columns='summary', values=rmse_col)
-            .reset_index()
-        )
-        ordered_methods = [
-            method for method in method_order
-            if method in set(side_summary['method'])
-        ]
-        remaining_methods = [
-            method for method in side_summary['method']
-            if method not in method_order
-        ]
-        side_summary['method'] = pd.Categorical(
-            side_summary['method'],
-            categories=ordered_methods + remaining_methods,
-            ordered=True
-        )
-        side_summary = side_summary.sort_values('method').reset_index(drop=True)
-        side_summary['method'] = side_summary['method'].astype(str)
-        side_summary = side_summary[['method'] + summary_order]
-        side_summary = side_summary.rename(columns={'method': '手法'})
-
-        print(f'\n=== {side_label}RMSEの区間平均 ===')
-        print(
-            side_summary.to_string(
-                index=False,
-                float_format=lambda x: f'{x:.4f}'
-            )
-        )
-
-
 # =========================================================
-# Plotting
+# 推定進行方向の時系列描画
 # =========================================================
-
-def plot_pca_method_absolute_error_cdf(method_specs):
-    # 手法ごとの色を固定する。
-    color_map = {
-        '固定窓PCA': 'tab:blue',
-        '固定窓・寄与率重み付きPCA': 'tab:orange',
-        '可変窓PCA': 'tab:green',
-        '可変窓・寄与率重み付きPCA': 'tab:red',
-        '前時刻比較型可変窓PCA': 'tab:purple',
-        '前時刻比較型可変窓・寄与率重み付きPCA': 'tab:brown',
-        '左右独立・前時刻比較型可変窓PCA': 'tab:pink',
-        '左右独立・前時刻比較型可変窓・寄与率重み付きPCA': 'tab:gray'
-    }
-
-    fig, ax = plt.subplots(
-        1,
-        1,
-        figsize=(11, 7)
-    )
-
-    plotted_method_count = 0
-
-    for (
-        method_name,
-        heading_R,
-        heading_L,
-        use_weighted_mean,
-        use_simple_mean
-    ) in method_specs:
-        cdf_df = make_absolute_error_cdf_data(
-            heading_R,
-            heading_L,
-            use_weighted_mean=use_weighted_mean,
-            use_simple_mean=use_simple_mean
-        )
-
-        if len(cdf_df) == 0:
-            print(
-                f'{method_name}: '
-                'CDFを計算できるデータがありません。'
-            )
-            continue
-
-        ax.step(
-            cdf_df['absolute_error_deg'],
-            cdf_df['cdf'],
-            where='post',
-            label=(
-                f'{method_name} '
-                            ),
-            color=color_map.get(method_name),
-            linewidth=2.0,
-            alpha=0.9
-        )
-
-        plotted_method_count += 1
-
-    if plotted_method_count == 0:
-        ax.text(
-            0.5,
-            0.5,
-            'プロットできるCDFデータがありません。',
-            ha='center',
-            va='center',
-            transform=ax.transAxes
-        )
-
-    ax.set_xlabel(
-        '左右平均の絶対誤差 [deg]',
-        fontsize=16
-    )
-    ax.set_ylabel(
-        '累積確率',
-        fontsize=16
-    )
-    
-    # 絶対角度誤差なので、横軸の最小値は0度。
-    ax.set_xlim(0.0, 60.0)
-
-    # CDFの値域は0～1。
-    ax.set_ylim(0.0, 1.0)
-
-    ax.set_yticks(np.arange(0.0, 1.01, 0.1))
-    ax.tick_params(axis='both', labelsize=13)
-
-
-
-    ax.grid(
-        True,
-        which='both',
-        linestyle='--',
-        alpha=0.5
-    )
-
-    if plotted_method_count > 0:
-        ax.legend()
-
-    plt.tight_layout()
-    plt.show()
-
-
-# 左右の推定方位を時刻でそろえ，描画用の真値と平均方位を作る。
 def align_heading_for_plot(
     heading_R,
     heading_L,
@@ -1923,7 +1611,6 @@ def plot_heading_estimate(ax, t_plot, theta_plot, label, color, marker_size=12):
         )
 
 
-# 1つの軸に左右推定方位，平均方位，真値方位を描画する。
 def plot_heading_on_axis(
     ax,
     heading_R,
@@ -1997,561 +1684,234 @@ def plot_heading_on_axis(
     ax.legend()
 
 
-# 通常PCAと寄与率重み付きPCAの方位時系列を横並びで描画する。
-def plot_pca_comparison_figure(
-    acc_heading_R,
-    acc_heading_L,
-    prop_heading_R,
-    prop_heading_L,
-    figure_title
-):
-    fig, axes = plt.subplots(
-        1,
-        2,
-        figsize=(16, 6),
-        sharex=True,
-        sharey=True,
-        squeeze=False
-    )
-
-    fig.suptitle(figure_title, fontsize=16)
-
-    plot_heading_on_axis(
-        axes[0, 0],
-        acc_heading_R,
-        acc_heading_L,
-        '加速度PCA',
-        use_weighted_mean=False
-    )
-
-    plot_heading_on_axis(
-        axes[0, 1],
-        prop_heading_R,
-        prop_heading_L,
-        '寄与率重み付き加速度PCA',
-        use_weighted_mean=True
-    )
-
-    plt.tight_layout()
-    plt.show()
-
-
-# 角速度累積法の左右単体と左右平均を描画する。
-def plot_gyro_heading_figure(gyro_heading_R, gyro_heading_L):
-    fig, ax = plt.subplots(
-        1,
-        1,
-        figsize=(12, 6)
-    )
-
-    plot_heading_on_axis(
-        ax,
-        gyro_heading_R,
-        gyro_heading_L,
-        '角速度累積法',
-        use_weighted_mean=False,
-        use_simple_mean=True
-    )
-
-    fig.suptitle('時系列変化（角速度累積法）', fontsize=16)
-    plt.tight_layout()
-    plt.show()
-
-
-# PC1寄与率の変化を描画範囲に絞る。
-def prepare_pc1_window_plot_df(window_schedule_common):
-    if window_schedule_common is None or len(window_schedule_common) == 0:
-        return empty_pc1_window_schedule_df()
-
-    plot_window = window_schedule_common.copy()
-    if is_mask == 1:
-        mask = (
-            (plot_window['time_s'] >= limit_min_time)
-            & (plot_window['time_s'] <= limit_max_time)
-        )
-        plot_window = plot_window.loc[mask].reset_index(drop=True)
-
-    return plot_window
-
-
-# PC1寄与率の変化を描画する。
-def plot_pc1_window_control(window_schedule_common):
-    plot_window = prepare_pc1_window_plot_df(window_schedule_common)
-
-    fig, axes = plt.subplots(
-        1,
-        2,
-        figsize=(16, 5),
-        sharex=True,
-        sharey=True
-    )
-
-    fig.suptitle('PC1寄与率の時系列変化', fontsize=16)
-
-    plot_specs = [
-        (axes[0], 'pc1_ratio_L', '左手', 'b'),
-        (axes[1], 'pc1_ratio_R', '右手', 'r')
-    ]
-
-    for ax_ratio, ratio_column, hand_label, line_color in plot_specs:
-        add_turn_regions_to_axis(ax_ratio, turn_start_times, turn_end_times)
-
-        if len(plot_window) > 0:
-            ax_ratio.plot(
-                plot_window['time_s'],
-                plot_window[ratio_column],
-                label=f'{hand_label} PC1寄与率',
-                c=line_color,
-                alpha=0.8
-            )
-
-        # ax_ratio.axhline(
-        #     PCA_PC1_LOW_THRESHOLD,
-        #     c='k',
-        #     linestyle='--',
-        #     alpha=0.7,
-        #     label=f'窓幅縮小閾値 {PCA_PC1_LOW_THRESHOLD:g}'
-        # )
-        # ax_ratio.axhline(
-        #     PCA_PC1_HIGH_THRESHOLD,
-        #     c='k',
-        #     linestyle=':',
-        #     alpha=0.7,
-        #     label=f'窓幅回復閾値 {PCA_PC1_HIGH_THRESHOLD:g}'
-        # )
-  
-        ax_ratio.set_xlabel('時間 [s]')
-        ax_ratio.set_ylabel('PC1寄与率')
-        ax_ratio.set_title(hand_label)
-        ax_ratio.set_xlim(20, 60)
-        ax_ratio.set_ylim(0.5, 1.0)
-        ax_ratio.grid(True)
-        ax_ratio.legend()
-
-    plt.tight_layout()
-    plt.show()
-
-    # PCA窓幅の時系列変化を歩行時刻範囲に絞る
-def prepare_pca_window_size_plot_df(window_schedule):
-    if window_schedule is None or len(window_schedule) == 0:
-            return pd.DataFrame()
-
-    plot_window = window_schedule.copy()
-
-    mask = ((plot_window['time_s'] >= limit_min_time) & (plot_window['time_s'] <= limit_max_time))
-
-    return plot_window.loc[mask].reset_index(drop=True)
-
-    # PCA計算前は黒の点線、計算開始後は実際の窓幅を実線でプロット
-def plot_previous_pc1_window_size(window_schedule_previous_pc1_L, window_schedule_previous_pc1_R):
-
-    if USE_INDEPENDENT_PREVIOUS_PC1_WINDOW:
-        fig, axes = plt.subplots(1, 2, figsize = (16,5), sharex=True, sharey= True)
-
-        plot_specs = [(axes[0], window_schedule_previous_pc1_L, '左手'), (axes[1], window_schedule_previous_pc1_R, '右手')]
-
-        fig.suptitle('左右独立型におけるPCA窓幅の時系列変化', fontsize = 16)
-
-    else:
-        fig, ax = plt.subplots(1, 1, figsize = (12,5))
-
-        plot_specs = [(ax, window_schedule_previous_pc1_L, None)]
-
-        ax.set_title('PCA窓幅の時系列変化', fontsize=16)
-
-    for ax_window, window_schedule, hand_label in plot_specs:
-        plot_window = prepare_pca_window_size_plot_df(window_schedule)
-
-        add_turn_regions_to_axis(ax_window, turn_start_times, turn_end_times)
-
-        if len(plot_window) == 0:
-            ax_window.text(0.5, 0.5, 'プロットするデータが存在しません', ha = 'center', va = 'center', transform=ax_window.transAxes)
-
-        else:
-            if 'pc1_ratio' in plot_window.columns:
-                pca_valid_mask = np.isfinite(plot_window['pc1_ratio'])
-
-            else:
-                pca_valid_mask = (np.isfinite(plot_window['pc1_ratio_L']) & np.isfinite(plot_window['pc1_ratio_R']))
-                
-            valid_positions = np.flatnonzero(pca_valid_mask.to_numpy())
-
-            if len(valid_positions) == 0:
-                print('PCAを計算できませんでした')
-
-            else:
-                first_valid_position = int(valid_positions[0])
-
-                first_valid_time = float(plot_window['time_s'].iloc[first_valid_position])
-
-            if first_valid_time > limit_min_time:
-                ax_window.plot([limit_min_time,first_valid_time], [PCA_WINDOW_MIN,PCA_WINDOW_MIN], c='k', linestyle = '--',
-                                linewidth = 2.0)
-
-            valid_window = (plot_window.iloc[first_valid_position:].reset_index(drop=True))
-
-            ax_window.step(valid_window['time_s'], valid_window['window_size'], where='post', c='tab:blue', linestyle='-',
-                            linewidth=1.7, alpha= 1.0, label='PCA窓幅')
-
-            ax_window.set_xlim(limit_min_time, limit_max_time)
-            ax_window.set_ylim(PCA_WINDOW_MIN - 1, PCA_WINDOW_MAX + 1)
-            ax_window.set_yticks(np.arange(PCA_WINDOW_MIN, PCA_WINDOW_MAX + 1, 5))
-
-            ax_window.set_xlabel('時刻 [s]', fontsize=16)
-            ax_window.set_ylabel('PCA窓幅', fontsize=16)
-
-            ax_window.grid(True, alpha = 0.5)
-
-            if hand_label is not None:
-                ax_window.set_title(hand_label)
-
-            ax_window.legend()
-
-    plt.tight_layout()
-    plt.show()
-        
-                
 # =========================================================
-# Main
+# 3手法の比較・結果表示
 # =========================================================
-# データ同期から各手法の推定，評価，描画までの全体処理を実行する。
-def main():
-    validate_true_heading_settings()
-
-    sync_data = prepare_synchronized_sensor_data()
-
+def calculate_method_headings(sync_data, gyro_mean_heading):
+    """3手法の (表示名, 補正済み右方位, 補正済み左方位, 色) を返す。"""
     sync_L = sync_data['L']
     sync_R = sync_data['R']
     initial_quat_L = sync_data['initial_quat_L']
     initial_quat_R = sync_data['initial_quat_R']
 
-    gyro_heading_L = compute_heading_gyro_integral_from_synced(
-        sync_L,
-        initial_quat_L,
-        initial_heading_deg=90.0
+    # 固定窓PCA: 既存の窓幅をそのまま使用する。
+    heading_L_fixed = compute_heading_acc_pca_from_synced(
+        sync_L, initial_quat_L, window_size=WINDOW_SIZE
     )
-    gyro_heading_R = compute_heading_gyro_integral_from_synced(
-        sync_R,
-        initial_quat_R,
-        initial_heading_deg=90.0
-    )
-    gyro_mean_heading = make_gyro_mean_heading(
-        gyro_heading_R,
-        gyro_heading_L
+    heading_R_fixed = compute_heading_acc_pca_from_synced(
+        sync_R, initial_quat_R, window_size=WINDOW_SIZE
     )
 
-    window_schedule_common = make_common_window_schedule_from_pc1(
-        sync_L,
-        initial_quat_L,
-        sync_R,
-        initial_quat_R
+    # 閾値型可変窓PCA: 左右共通の窓幅・閾値・回復処理を再利用する。
+    threshold_schedule = make_common_window_schedule_from_pc1(
+        sync_L, initial_quat_L, sync_R, initial_quat_R
     )
+    heading_L_threshold = compute_heading_acc_pca_variable_from_synced(
+        sync_L, initial_quat_L, threshold_schedule, use_ratio_weight=False
+    )
+    heading_R_threshold = compute_heading_acc_pca_variable_from_synced(
+        sync_R, initial_quat_R, threshold_schedule, use_ratio_weight=False
+    )
+
+    # 前時刻比較型可変窓PCA: このファイルの設定だけで切り替える。
     if USE_INDEPENDENT_PREVIOUS_PC1_WINDOW:
-        previous_pc1_method_name = (
-            '左右独立・前時刻比較型可変窓PCA'
-        )
-        previous_pc1_weighted_method_name = (
-            '左右独立・前時刻比較型可変窓・寄与率重み付きPCA'
-        )
-        previous_pc1_figure_title = (
-            '左右独立・前時刻寄与率比較型可変窓PCA'
-        )
-        previous_pc1_progress_message = (
-            '=== 左右独立・前時刻寄与率比較型可変窓PCAを計算中 ==='
-        )
-        window_schedule_previous_pc1_L = (
+        previous_name = '左右独立・前時刻比較型可変窓PCA'
+        previous_schedule_L = (
             make_independent_window_schedule_by_previous_pc1(
-                sync_L,
-                initial_quat_L
+                sync_L, initial_quat_L
             )
         )
-        window_schedule_previous_pc1_R = (
+        previous_schedule_R = (
             make_independent_window_schedule_by_previous_pc1(
-                sync_R,
-                initial_quat_R
+                sync_R, initial_quat_R
             )
-        )
-        print_independent_previous_pc1_window_diagnostics(
-            window_schedule_previous_pc1_L,
-            window_schedule_previous_pc1_R
         )
     else:
-        previous_pc1_method_name = (
-            '前時刻比較型可変窓PCA'
+        previous_name = '前時刻比較型可変窓PCA'
+        previous_schedule = make_common_window_schedule_by_previous_pc1(
+            sync_L, initial_quat_L, sync_R, initial_quat_R
         )
-        previous_pc1_weighted_method_name = (
-            '前時刻比較型可変窓・寄与率重み付きPCA'
-        )
-        previous_pc1_figure_title = (
-            '前時刻寄与率比較型可変窓PCA'
-        )
-        previous_pc1_progress_message = (
-            '=== 前時刻寄与率比較型可変窓PCAを計算中 ==='
-        )
-        window_schedule_previous_pc1 = (
-            make_common_window_schedule_by_previous_pc1(
-                sync_L,
-                initial_quat_L,
-                sync_R,
-                initial_quat_R
-            )
-        )
-        window_schedule_previous_pc1_L = window_schedule_previous_pc1
-        window_schedule_previous_pc1_R = window_schedule_previous_pc1
-        print_previous_pc1_window_diagnostics(
-            window_schedule_previous_pc1
-        )
+        previous_schedule_L = previous_schedule
+        previous_schedule_R = previous_schedule
 
-    print('\n=== 固定窓PCAを計算中 ===')
-    heading_L_pca_fixed = compute_heading_acc_pca_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_size=WINDOW_SIZE
+    heading_L_previous = compute_heading_acc_pca_variable_from_synced(
+        sync_L, initial_quat_L, previous_schedule_L, use_ratio_weight=False
     )
-    heading_R_pca_fixed = compute_heading_acc_pca_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_size=WINDOW_SIZE
+    heading_R_previous = compute_heading_acc_pca_variable_from_synced(
+        sync_R, initial_quat_R, previous_schedule_R, use_ratio_weight=False
     )
 
-    heading_L_prop_fixed = compute_heading_acc_pca_proposed_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_size=WINDOW_SIZE
-    )
-    heading_R_prop_fixed = compute_heading_acc_pca_proposed_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_size=WINDOW_SIZE
-    )
-
-    print('\n=== PC1寄与率可変窓PCAを計算中 ===')
-    heading_L_pca_variable = compute_heading_acc_pca_variable_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_schedule_common,
-        use_ratio_weight=False
-    )
-    heading_R_pca_variable = compute_heading_acc_pca_variable_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_schedule_common,
-        use_ratio_weight=False
-    )
-
-    heading_L_prop_variable = compute_heading_acc_pca_variable_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_schedule_common,
-        use_ratio_weight=True
-    )
-    heading_R_prop_variable = compute_heading_acc_pca_variable_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_schedule_common,
-        use_ratio_weight=True
-    )
-
-    print(f'\n{previous_pc1_progress_message}')
-    heading_L_pca_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_schedule_previous_pc1_L,
-        use_ratio_weight=False
-    )
-    heading_R_pca_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_schedule_previous_pc1_R,
-        use_ratio_weight=False
-    )
-
-    heading_L_prop_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
-        sync_L,
-        initial_quat_L,
-        window_schedule_previous_pc1_L,
-        use_ratio_weight=True
-    )
-    heading_R_prop_previous_pc1 = compute_heading_acc_pca_variable_from_synced(
-        sync_R,
-        initial_quat_R,
-        window_schedule_previous_pc1_R,
-        use_ratio_weight=True
-    )
-
-    print('\n=== 角速度累積法を用いたPCA 180度補正中 ===')
-    heading_L_pca_fixed = resolve_pca_180_by_gyro(
-        heading_L_pca_fixed,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_R_pca_fixed = resolve_pca_180_by_gyro(
-        heading_R_pca_fixed,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_L_prop_fixed = resolve_pca_180_by_gyro(
-        heading_L_prop_fixed,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-    heading_R_prop_fixed = resolve_pca_180_by_gyro(
-        heading_R_prop_fixed,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-    heading_L_pca_variable = resolve_pca_180_by_gyro(
-        heading_L_pca_variable,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_R_pca_variable = resolve_pca_180_by_gyro(
-        heading_R_pca_variable,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_L_prop_variable = resolve_pca_180_by_gyro(
-        heading_L_prop_variable,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-    heading_R_prop_variable = resolve_pca_180_by_gyro(
-        heading_R_prop_variable,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-    heading_L_pca_previous_pc1 = resolve_pca_180_by_gyro(
-        heading_L_pca_previous_pc1,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_R_pca_previous_pc1 = resolve_pca_180_by_gyro(
-        heading_R_pca_previous_pc1,
-        gyro_mean_heading,
-        use_ratio_weight=False
-    )
-    heading_L_prop_previous_pc1 = resolve_pca_180_by_gyro(
-        heading_L_prop_previous_pc1,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-    heading_R_prop_previous_pc1 = resolve_pca_180_by_gyro(
-        heading_R_prop_previous_pc1,
-        gyro_mean_heading,
-        use_ratio_weight=True
-    )
-
-    section_method_specs = [
+    method_specs = [
+        ('固定窓PCA', heading_R_fixed, heading_L_fixed, COLOR_FIXED),
         (
-            '固定窓PCA',
-            heading_R_pca_fixed,
-            heading_L_pca_fixed,
-            False,
-            False
+            '閾値型可変窓PCA',
+            heading_R_threshold,
+            heading_L_threshold,
+            COLOR_THRESHOLD
         ),
-        (
-            '固定窓・寄与率重み付きPCA',
-            heading_R_prop_fixed,
-            heading_L_prop_fixed,
-            True,
-            False
-        ),
-        (
-            '可変窓PCA',
-            heading_R_pca_variable,
-            heading_L_pca_variable,
-            False,
-            False
-        ),
-        (
-            '可変窓・寄与率重み付きPCA',
-            heading_R_prop_variable,
-            heading_L_prop_variable,
-            True,
-            False
-        ),
-        (
-            previous_pc1_method_name,
-            heading_R_pca_previous_pc1,
-            heading_L_pca_previous_pc1,
-            False,
-            False
-        ),
-        (
-            previous_pc1_weighted_method_name,
-            heading_R_prop_previous_pc1,
-            heading_L_prop_previous_pc1,
-            True,
-            False
-        ),
-        (
-            '角速度累積法',
-            gyro_heading_R,
-            gyro_heading_L,
-            False,
-            True
-        )
+        (previous_name, heading_R_previous, heading_L_previous, COLOR_PREVIOUS)
     ]
 
-    section_rmse_rows = []
-    for (
-        method_name,
-        heading_R,
-        heading_L,
-        use_weighted_mean,
-        use_simple_mean
-    ) in section_method_specs:
-        section_rmse_rows.extend(
+    # 左右とも、同じ角速度累積法の平均方位を基準に180度補正する。
+    corrected_methods = []
+    for method_name, heading_R, heading_L, color in method_specs:
+        corrected_R = resolve_pca_180_by_gyro(
+            heading_R, gyro_mean_heading, use_ratio_weight=False
+        )
+        corrected_L = resolve_pca_180_by_gyro(
+            heading_L, gyro_mean_heading, use_ratio_weight=False
+        )
+        corrected_methods.append((method_name, corrected_R, corrected_L, color))
+
+    return corrected_methods
+
+
+def calculate_rmse_summary(method_specs):
+    """直進8・方向転換7・全15区間のRMSE平均を、左右平均列だけ返す。"""
+    section_rows = []
+    for method_name, heading_R, heading_L, _ in method_specs:
+        section_rows.extend(
             calc_section_rmse_rows(
                 method_name,
                 heading_R,
                 heading_L,
-                use_weighted_mean=use_weighted_mean,
-                use_simple_mean=use_simple_mean
+                use_weighted_mean=False,
+                use_simple_mean=False
             )
         )
 
-    print_section_rmse_tables(section_rmse_rows)
+    # 全サンプルをまとめたRMSEではなく、既存の区間RMSEの単純平均。
+    summary = make_section_rmse_summary(pd.DataFrame(section_rows))
+    return summary[['method', 'summary', 'mean_rmse_deg']].copy()
 
-    cdf_method_specs = [spec
-                        for spec in section_method_specs
-                        if spec[0] != '角速度累積法']
 
-    plot_pca_method_absolute_error_cdf(cdf_method_specs)
+def print_rmse_summary(summary):
+    """手法見出しと、左右平均のRMSEを合計9個だけ表示する。"""
+    summary_labels = [
+        ('直進歩行区間平均', '直進区間平均RMSE'),
+        ('方向転換区間平均', '方向転換区間平均RMSE'),
+        ('全15区間平均', '全区間平均RMSE')
+    ]
+    for method_name in summary['method'].drop_duplicates():
+        values = (
+            summary.loc[summary['method'] == method_name]
+            .set_index('summary')['mean_rmse_deg']
+        )
+        print(f'\n=== {method_name} ===')
+        for summary_name, display_label in summary_labels:
+            print(f'{display_label}: {values.loc[summary_name]:.4f} deg')
 
-    plot_gyro_heading_figure(
-        gyro_heading_R,
-        gyro_heading_L
+
+def make_cdf_data(method_specs):
+    """左右のベクトル平均から、既存の評価時間・角度差・CDF計算を使う。"""
+    cdf_specs = []
+    for method_name, heading_R, heading_L, color in method_specs:
+        cdf_df = make_absolute_error_cdf_data(
+            heading_R,
+            heading_L,
+            use_weighted_mean=False,
+            use_simple_mean=False
+        )
+        cdf_specs.append((method_name, cdf_df, color))
+    return cdf_specs
+
+
+def configure_cdf_axis(ax):
+    """2つのFigureでCDFの表示範囲と軸設定をそろえる。"""
+    ax.set_xlabel('左右平均の絶対誤差 [deg]')
+    ax.set_ylabel('累積確率')
+    ax.set_xlim(0.0, 50.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_yticks(np.arange(0.0, 1.01, 0.1))
+    ax.grid(True, which='both', linestyle='--', alpha=0.5)
+
+
+def plot_cdf_separately(cdf_specs):
+    """固定窓・閾値型・前時刻比較型のCDFを横3列に表示する。"""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True, sharey=True)
+    for ax, (method_name, cdf_df, color) in zip(axes, cdf_specs):
+        ax.set_title(method_name)
+        configure_cdf_axis(ax)
+        if cdf_df.empty:
+            ax.text(
+                0.5, 0.5, 'CDFを計算できるデータがありません。',
+                ha='center', va='center', transform=ax.transAxes
+            )
+        else:
+            ax.step(
+                cdf_df['absolute_error_deg'], cdf_df['cdf'],
+                where='post', color=color, linewidth=2.0, alpha=0.9
+            )
+    fig.tight_layout()
+    return fig, axes
+
+
+def plot_cdf_combined(cdf_specs):
+    """同じCDFデータを1つのAxesに重ねる。凡例は作成しない。"""
+    fig, ax = plt.subplots(figsize=(11, 7))
+    configure_cdf_axis(ax)
+    missing_methods = []
+    for method_name, cdf_df, color in cdf_specs:
+        if cdf_df.empty:
+            missing_methods.append(method_name)
+            continue
+        ax.step(
+            cdf_df['absolute_error_deg'], cdf_df['cdf'],
+            where='post', color=color, linewidth=3.0, alpha=0.9
+        )
+    if missing_methods:
+        ax.text(
+            0.5, 0.5,
+            '\n'.join(f'{name}: CDFデータなし' for name in missing_methods),
+            ha='center', va='center', transform=ax.transAxes
+        )
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_heading_comparison(method_specs):
+    """3手法の補正済み推定方位と真値を横一列に表示する。"""
+    fig, axes = plt.subplots(
+        1, 3, figsize=(21, 6), sharex=True, sharey=True
     )
+    for ax, (method_name, heading_R, heading_L, _) in zip(axes, method_specs):
+        plot_heading_on_axis(
+            ax,
+            heading_R,
+            heading_L,
+            title_str=method_name,
+            use_weighted_mean=False,
+            use_simple_mean=False
+        )
+    fig.tight_layout()
+    return fig, axes
 
-    plot_pca_comparison_figure(
-        heading_R_pca_fixed,
-        heading_L_pca_fixed,
-        heading_R_prop_fixed,
-        heading_L_prop_fixed,
-        figure_title=f'固定窓PCA（窓幅: {WINDOW_SIZE}サンプル）'
+
+def main():
+    validate_true_heading_settings()
+
+    # 同期計算はそのまま実行し、その関数が出力する診断printだけ抑制する。
+    with redirect_stdout(StringIO()):
+        sync_data = prepare_synchronized_sensor_data()
+
+    # 角速度累積法は180度補正の基準としてのみ使用する。
+    gyro_heading_L = compute_heading_gyro_integral_from_synced(
+        sync_data['L'], sync_data['initial_quat_L'], initial_heading_deg=90.0
     )
-
-    plot_pca_comparison_figure(
-        heading_R_pca_variable,
-        heading_L_pca_variable,
-        heading_R_prop_variable,
-        heading_L_prop_variable,
-        figure_title='PC1寄与率可変窓PCA'
+    gyro_heading_R = compute_heading_gyro_integral_from_synced(
+        sync_data['R'], sync_data['initial_quat_R'], initial_heading_deg=90.0
     )
+    gyro_mean_heading = make_gyro_mean_heading(gyro_heading_R, gyro_heading_L)
 
-    plot_pca_comparison_figure(
-        heading_R_pca_previous_pc1,
-        heading_L_pca_previous_pc1,
-        heading_R_prop_previous_pc1,
-        heading_L_prop_previous_pc1,
-        figure_title=previous_pc1_figure_title
-    )
+    method_specs = calculate_method_headings(sync_data, gyro_mean_heading)
+    summary = calculate_rmse_summary(method_specs)
+    print_rmse_summary(summary)
 
-    plot_pc1_window_control(window_schedule_common)
-
-    # 前時刻比較型におけるPCA窓幅の時系列変化をプロット
-    plot_previous_pc1_window_size(window_schedule_previous_pc1_L, window_schedule_previous_pc1_R)
+    cdf_specs = make_cdf_data(method_specs)
+    plot_cdf_separately(cdf_specs)
+    plot_cdf_combined(cdf_specs)
+    plot_heading_comparison(method_specs)
+    plt.show()
 
 
 if __name__ == '__main__':

@@ -11,12 +11,12 @@ from pathlib import Path
 print("ライブラリのインポートが完了しました。")
 
 # --- 1. 定数と設定 ---
-WINDOW_SIZE = 40
-PCA_AXIS_HALF_LENGTH_RATIO = 1 / 3
-FILE_PATH = r'260630香川共同研究/KL2.csv'
-OUTPUT_GIF_DIR = Path(__file__).resolve().parent / 'GIF画像'
+WINDOW_SIZE = 20
+PCA_AXIS_HALF_LENGTH_RATIO = 0.8
+FILE_PATH = 'PC1.csv'
+OUTPUT_GIF_DIR = Path(r"C:\書類\宇都宮大学大学院\藤井研究室_研究\yudai_データ分析\Python & CSVファイル\GIF画像")
 OUTPUT_GIF_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_GIF_PATH = OUTPUT_GIF_DIR / f'{Path(FILE_PATH).stem}-PCA.gif'
+OUTPUT_GIF_PATH = OUTPUT_GIF_DIR / f'{Path(FILE_PATH).stem}-{WINDOW_SIZE}.gif'
 
 # --- 2. データの読み込み ---
 try:
@@ -39,9 +39,9 @@ merged_df = pd.merge_asof(
 
 # 結合後の列名を分かりやすく設定
 # 加速度
-ax = merged_df['X_acc']
-ay = merged_df['Y_acc']
-az = merged_df['Z_acc']
+acc_x = merged_df['X_acc']
+acc_y = merged_df['Y_acc']
+acc_z = merged_df['Z_acc']
 # クォータニオン
 gx = merged_df['X_ro']
 gy = merged_df['Y_ro']
@@ -66,9 +66,9 @@ gzc = gw*Gz0 - gx*Gy0 + gy*Gx0 + gz*Gw0
 
 # --- 回転行列の適用（加速度ベクトルの回転 P' = q_relative * P * q_relative_conjugate）---
 # 相対化した回転行列の計算
-Ax = (2*gwc*gwc + 2*gxc*gxc - 1)*ax + (2*gxc*gyc - 2*gzc*gwc)*ay + (2*gxc*gzc + 2*gyc*gwc)*az
-Ay = (2*gxc*gyc + 2*gzc*gwc)*ax + (2*gwc*gwc + 2*gyc*gyc - 1)*ay + (2*gyc*gzc - 2*gxc*gwc)*az
-Az = (2*gxc*gzc - 2*gyc*gwc)*ax + (2*gyc*gzc + 2*gxc*gwc)*ay + (2*gwc*gwc + 2*gzc*gzc - 1)*az
+Ax = (2*gwc*gwc + 2*gxc*gxc - 1)*acc_x + (2*gxc*gyc - 2*gzc*gwc)*acc_y + (2*gxc*gzc + 2*gyc*gwc)*acc_z
+Ay = (2*gxc*gyc + 2*gzc*gwc)*acc_x + (2*gwc*gwc + 2*gyc*gyc - 1)*acc_y + (2*gyc*gzc - 2*gxc*gwc)*acc_z
+Az = (2*gxc*gzc - 2*gyc*gwc)*acc_x + (2*gyc*gzc + 2*gxc*gwc)*acc_y + (2*gwc*gwc + 2*gzc*gzc - 1)*acc_z
 
 merged_df['X_rotated'] = Ax
 merged_df['Y_rotated'] = Ay
@@ -108,28 +108,46 @@ overview_limit = np.max(absolute_acceleration) * 1.1
 if overview_limit == 0:
     overview_limit = 1.0
 
-fig, (detail_ax, overview_ax) = plt.subplots(1, 2, figsize=(16, 8))
+fig, ax = plt.subplots(figsize=(8, 8))
 
-for plot_ax, plot_limit, title in (
-        (detail_ax, detail_limit, '通常範囲（99.5パーセンタイル）'),
-        (overview_ax, overview_limit, '全体範囲（外れ値を含む）')):
-    plot_ax.set_xlim(-plot_limit, plot_limit)
-    plot_ax.set_ylim(-plot_limit, plot_limit)
-    plot_ax.set_aspect('equal', adjustable='box')
-    plot_ax.set_xlabel('X方向加速度')
-    plot_ax.set_ylabel('Y方向加速度')
-    plot_ax.set_title(title)
-    plot_ax.grid(True)
+ax.set_xlim(-detail_limit, detail_limit)
+ax.set_ylim(-detail_limit, detail_limit)
+ax.set_aspect('equal', adjustable='box')
+ax.grid(True)
+
+truth_arrow = ax.quiver(
+    0, 0,          # 始点 (x, y)
+    0, 5,          # ベクトル (u, v)
+    angles='xy',
+    scale_units='xy',
+    scale=1,
+    color='black',
+    alpha=0.7,
+    width=0.005,
+    headwidth=5,
+    headlength=7,
+    headaxislength=6,
+    zorder=10
+)
 
 #アニメーション要素の初期化
-detail_points, = detail_ax.plot(
-    [], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
-overview_points, = overview_ax.plot(
-    [], [], marker='o', linestyle='None', markersize=2, alpha=0.7)
+points, = ax.plot(
+    [],
+    [],
+    marker='o',
+    linestyle='None',
+    markersize=4,
+    alpha=1.0
+)
 
-#第一主成分軸を表す、矢印のない赤い実線
-detail_pca_line, = detail_ax.plot([], [], color='red', linestyle='-')
-overview_pca_line, = overview_ax.plot([], [], color='red', linestyle='-')
+pca_line, = ax.plot(
+    [],
+    [],
+    color='red',
+    linestyle='-',
+    linewidth=3,
+    alpha=0.7
+)
 
 fig.tight_layout()
 
@@ -156,11 +174,6 @@ x_max_time_sec = (x_max_timestamp_ns - time_data[0]) / 1_000_000_000
 y_min_time_sec = (y_min_timestamp_ns - time_data[0]) / 1_000_000_000
 y_max_time_sec = (y_max_timestamp_ns - time_data[0]) / 1_000_000_000
 
-print(f"xの最小値は {x_min:.6f} で，時刻は {x_min_time_sec:.6f} 秒です。")
-print(f"xの最大値は {x_max:.6f} で，時刻は {x_max_time_sec:.6f} 秒です。")
-print(f"yの最小値は {y_min:.6f} で，時刻は {y_min_time_sec:.6f} 秒です。")
-print(f"yの最大値は {y_max:.6f} で，時刻は {y_max_time_sec:.6f} 秒です。")
-
 
 def pca_axis_endpoints(unit_vector, limit):
     half_axis_vector = unit_vector * (limit * PCA_AXIS_HALF_LENGTH_RATIO)
@@ -176,15 +189,12 @@ def update(frame):
     x_window = x_data[start_index:end_index]
     y_window = y_data[start_index:end_index]
 
-    detail_points.set_data(x_window, y_window)
-    overview_points.set_data(x_window, y_window)
-    
-    if end_index - start_index < WINDOW_SIZE:
-        detail_pca_line.set_data([], [])
-        overview_pca_line.set_data([], [])
+    points.set_data(x_window, y_window)
 
-        return (detail_points, overview_points,
-                detail_pca_line, overview_pca_line)
+    if end_index - start_index < WINDOW_SIZE:
+        pca_line.set_data([], [])
+
+        return points, pca_line
 
     #データ数行，2列の2次元配列
     data_window = np.column_stack((x_window, y_window))
@@ -198,24 +208,19 @@ def update(frame):
     #pca_vectorを正規化
     norm_vector = pca_vector / np.linalg.norm(pca_vector)
 
-    detail_start, detail_end = pca_axis_endpoints(norm_vector, detail_limit)
-    overview_start, overview_end = pca_axis_endpoints(
-        norm_vector, overview_limit)
+    start, end = pca_axis_endpoints(norm_vector, detail_limit)
 
-    detail_pca_line.set_data(
-        [detail_start[0], detail_end[0]],
-        [detail_start[1], detail_end[1]])
-    overview_pca_line.set_data(
-        [overview_start[0], overview_end[0]],
-        [overview_start[1], overview_end[1]])
+    pca_line.set_data(
+    [start[0], end[0]],
+    [start[1], end[1]]
+    )
 
-    return (detail_points, overview_points,
-            detail_pca_line, overview_pca_line)
+    return points, pca_line
 
 
 #アニメーションの生成
 #必要引数:fig, func(各フレームごとに呼ばれる更新関数), frames(フレーム数)
-animation = FuncAnimation(fig, update, frames=500, blit=False)
+animation = FuncAnimation(fig, update, frames=len(df), blit=False)
 
 
 #GIFとして保存

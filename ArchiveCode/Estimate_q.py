@@ -13,13 +13,12 @@ import japanize_matplotlib
 # =========================================================
 # 0) ユーザー設定
 # =========================================================
-file_L = r'260814_片岡歩行データ/kataoka_L5.csv'
-file_R = r'260814_片岡歩行データ/kataoka_R5.csv'
-delay_time = 3.479035
-timer_start_time = 6.26
-cod_time = 20.16 + timer_start_time
-limit_min_time = 9.33 + timer_start_time
-limit_max_time = 30.0 + timer_start_time
+file_L = r'251209星田共同研究\HwL2.csv'
+file_R = r'251209星田共同研究\HwR2.csv'
+delay_time = 3.06
+cod_time = 21.99
+limit_min_time = 13.4
+limit_max_time = 27.75
 
 # 指定した範囲の誤差統計
 # eval_min_time == eval_max_time の場合は実行しない
@@ -424,9 +423,9 @@ def plot_heading_timeseries(
         _, ax = plt.subplots(figsize=(10, 6))
 
     if plot_as_points:
-        plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=4, alpha=0.8)
-        plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=4, alpha=0.8)
-        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=4, alpha=0.8)
+        #plt.scatter(t_plot, theta_L_plot, label='左手の端末', c='b', s=2, alpha=0.8)
+        #plt.scatter(t_plot, theta_R_plot, label='右手の端末', c='r', s=2, alpha=0.8)
+        ax.scatter(t_plot, theta_mean_plot, label='左右平均', c='g', s=2, alpha=0.8)
     else:
         ax.plot(t_plot, theta_L_plot, label='左手の端末', c='b', alpha=0.8)
         ax.plot(t_plot, theta_R_plot, label='右手の端末', c='r', alpha=0.8)
