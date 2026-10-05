@@ -1,4 +1,5 @@
 # 研究会用
+# 4試行の全誤差を3手法に分けて累積分布関数
 
 from contextlib import redirect_stdout
 from copy import deepcopy
